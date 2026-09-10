@@ -1,8 +1,25 @@
 # LivreScan backend
 
 Malá FastAPI služba s jedním endpointem `POST /extract`. Přijme OCR text
-z appky, zavolá Claude a vrátí seznam slovíček/frází s překladem — appka
-sama žádný Anthropic klíč nemá, ten zůstává jen tady na serveru.
+z appky, zavolá LLM a vrátí seznam slovíček/frází s překladem — appka
+sama žádný API klíč nemá, ten zůstává jen tady na serveru.
+
+Extrakci lze přepnout proměnnou `LIVRESCAN_PROVIDER` v `.env` (v repu
+defaultně `mock`; lokálně u vývojáře aktuálně nastaveno na `openrouter`
+s `nvidia/nemotron-3-super-120b-a12b:free` — kvalita vyhrála nad rychlostí):
+
+| Provider | Cena | Rychlost | Kvalita | Poznámka |
+|---|---|---|---|---|
+| `mock` | zdarma | okamžitě | fake data | žádné volání ven, pro testování appky |
+| `groq` | zdarma, bez karty | **~2 s** | dobrá, občas špatný idiom | `GROQ_API_KEY`, model `openai/gpt-oss-120b` |
+| `openrouter` | zdarma, bez karty | 55–115 s (sdílený pool) | **nejlepší z free**, konzistentní i na delším textu | `OPENROUTER_API_KEY`, model `nvidia/nemotron-3-super-120b-a12b:free` (aktuálně používaný) nebo `nex-agi/nex-n2.5-pro:free` |
+| `claude` | placené | rychlé | nejlepší | `ANTHROPIC_API_KEY` |
+
+Ověřeno naživo na Android emulátoru: reálná fotka francouzské stránky →
+10 kartiček, správně i idiomatické fráze (`pleuvait à verse` → "pršelo
+jako z konve"). Desítky sekund čekání po vyfocení jsou pro mobilní UX na
+hraně, ale kvalita byla prioritou — `groq` zůstává rychlá záložní volba,
+kdyby čekání vadilo.
 
 ## Spuštění lokálně
 
@@ -53,22 +70,46 @@ POST /extract
   ] }
 ```
 
-Text extrakce jede přes Anthropic tool-use (vynucené strukturované volání
-nástroje), takže odpověď je vždy validní JSON podle schématu, ne volný text
-k parsování.
+Extrakce jede přes vynucené strukturované volání nástroje/JSON schématu
+(liší se podle providera — tool-use u Claude/Groq, JSON instrukce v
+promptu u OpenRouteru), takže odpověď je vždy validní JSON podle schématu
+`VocabItem`, ne volný text k parsování.
 
-Model je `claude-haiku-4-5-20251001` (rychlý a levný, pro tenhle úkol
-dostatečný) — jde přepsat proměnnou prostředí `LIVRESCAN_MODEL`.
+Model pro každého providera jde přepsat proměnnou prostředí:
+`LIVRESCAN_MODEL` (claude), `LIVRESCAN_GROQ_MODEL` (groq),
+`LIVRESCAN_OPENROUTER_MODEL` (openrouter).
 
-## Proč ne Gemini
+## Proč ne Gemini / GitHub Models / Microsoft Phi-4
 
-Zkoušeli jsme nejdřív Gemini free tier, ale Google je (od poloviny 2026)
-uprostřed přechodu na nový formát API klíčů (`AQ.Ab...` místo `AIzaSy...`)
-a nový formát je aktuálně rozbitý — volání skončí na `401
-ACCESS_TOKEN_TYPE_UNSUPPORTED` / `API_KEY_SERVICE_BLOCKED` i po povolení
-API v Google Cloud Console. Je to široce hlášený problém na straně Googlu,
-ne něco opravitelného v tomhle repu. Až to Google opraví, přechod zpět by
-byl jednoduchý (kontrakt `/extract` je nezávislý na tom, co běží uvnitř).
+Zkoušeli jsme několik cest ke zdarma extrakci:
+
+- **Gemini free tier** — Google je uprostřed přechodu na nový formát API
+  klíčů (`AQ.Ab...` místo `AIzaSy...`) a nový formát je rozbitý — volání
+  skončí na `401 ACCESS_TOKEN_TYPE_UNSUPPORTED` / `API_KEY_SERVICE_BLOCKED`
+  i po povolení API v Google Cloud Console. Široce hlášený problém na
+  straně Googlu, ne něco opravitelného tady.
+- **GitHub Models** — kompletně zrušeno k 30. 7. 2026 (viz
+  [GitHub Changelog](https://github.blog/changelog/2026-07-30-github-models-is-now-retired/)).
+  Endpoint `models.github.ai/inference` vrací `410
+  github_models_retirement_brownout` bez ohledu na platnost tokenu.
+- **`microsoft/phi-4` na OpenRouteru** — existuje a funguje, ale není
+  zdarma (`$0.07`/`$0.14` za milion tokenů podle jejich API) a žádná
+  `:free` varianta Phi-4 v katalogu není, i když to tak podle několika
+  článků na webu vypadalo — ověřeno omylem až přímým dotazem na
+  `GET /api/v1/models`, ne z blogpostů.
+
+- **Groq free tier** — funguje a je rychlý (vlastní LPU hardware), ale
+  `llama-3.3-70b-versatile` zmizel z jejich katalogu (žádný obecný Llama
+  chat model tam teď není) — použili jsme `openai/gpt-oss-120b` místo něj.
+- **`google/gemma-4-31b-it:free` a `-26b-a4b-it:free` na OpenRouteru** —
+  cena skutečně `0`/`0`, ale oba jedou přes stejný sdílený pool "Google AI
+  Studio", který je často přetížený (`429 upstream_provider_shared_pool`).
+
+Nakonec používáme **`groq`** jako default (rychlost) s `openrouter`
+(`nex-agi/nex-n2.5-pro:free` nebo NVIDIA Nemotron) jako záložní volbou pro
+vyšší kvalitu, když čas nehraje roli. Kontrakt `/extract` je nezávislý na
+tom, co běží uvnitř — přechod na jiný provider je jen o doplnění dalšího
+`EXTRACTORS["..."]` v `app/main.py`.
 
 ## Co tu (zatím) není
 
