@@ -5,21 +5,24 @@ z appky, zavolá LLM a vrátí seznam slovíček/frází s překladem — appka
 sama žádný API klíč nemá, ten zůstává jen tady na serveru.
 
 Extrakci lze přepnout proměnnou `LIVRESCAN_PROVIDER` v `.env` (v repu
-defaultně `mock`; lokálně u vývojáře aktuálně nastaveno na `openrouter`
-s `nvidia/nemotron-3-super-120b-a12b:free` — kvalita vyhrála nad rychlostí):
+defaultně `mock`; na Azure i lokálně u vývojáře aktuálně nastaveno na
+`groq` — po vyzkoušení obojího v appce se ukázalo, že desítky sekund
+čekání po vyfocení u OpenRouteru jsou pro reálné použití neúnosné,
+i když kvalita byla o něco lepší):
 
 | Provider | Cena | Rychlost | Kvalita | Poznámka |
 |---|---|---|---|---|
 | `mock` | zdarma | okamžitě | fake data | žádné volání ven, pro testování appky |
-| `groq` | zdarma, bez karty | **~2 s** | dobrá, občas špatný idiom | `GROQ_API_KEY`, model `openai/gpt-oss-120b` |
-| `openrouter` | zdarma, bez karty | 55–115 s (sdílený pool) | **nejlepší z free**, konzistentní i na delším textu | `OPENROUTER_API_KEY`, model `nvidia/nemotron-3-super-120b-a12b:free` (aktuálně používaný) nebo `nex-agi/nex-n2.5-pro:free` |
+| `groq` | zdarma, bez karty | **~1,5–2 s** | dobrá, občas špatný idiom | `GROQ_API_KEY`, model `openai/gpt-oss-120b` — **aktuálně používané** |
+| `openrouter` | zdarma, bez karty | 55–115 s (sdílený pool) | nejlepší z free, konzistentní i na delším textu | `OPENROUTER_API_KEY`, model `nvidia/nemotron-3-super-120b-a12b:free` nebo `nex-agi/nex-n2.5-pro:free` — příliš pomalé na běžné použití v appce |
 | `claude` | placené | rychlé | nejlepší | `ANTHROPIC_API_KEY` |
 
-Ověřeno naživo na Android emulátoru: reálná fotka francouzské stránky →
-10 kartiček, správně i idiomatické fráze (`pleuvait à verse` → "pršelo
-jako z konve"). Desítky sekund čekání po vyfocení jsou pro mobilní UX na
-hraně, ale kvalita byla prioritou — `groq` zůstává rychlá záložní volba,
-kdyby čekání vadilo.
+Ověřeno naživo (Android emulátor i iPhone): reálná fotka francouzské
+stránky → kartičky se správnými překlady za ~1,5 s s Groqem. Idiomy
+(`à verse` apod.) občas nevyjdou úplně přesně — to je vědomý kompromis
+za rychlost; přepnutí zpět na `openrouter` je jen změna proměnné
+prostředí, bez redeploy (`az webapp config appsettings set -n
+livrescan-backend -g livrescan-rg --settings LIVRESCAN_PROVIDER=openrouter`).
 
 ## Spuštění lokálně
 
@@ -111,10 +114,51 @@ vyšší kvalitu, když čas nehraje roli. Kontrakt `/extract` je nezávislý na
 tom, co běží uvnitř — přechod na jiný provider je jen o doplnění dalšího
 `EXTRACTORS["..."]` v `app/main.py`.
 
+## Nasazení — Azure App Service (Free F1, $0/měsíc)
+
+Backend běží na `https://livrescan-backend.azurewebsites.net`, appka na
+tuhle URL míří defaultně (viz `lib/core/constants.dart`). Žádný Docker,
+žádný container registry — jen obyčejný Python zip-deploy.
+
+Založení (jednorázově):
+
+```bash
+az appservice plan create --name livrescan-plan -g livrescan-rg \
+  --sku F1 --is-linux --location westeurope
+az webapp create -g livrescan-rg --plan livrescan-plan \
+  --name livrescan-backend --runtime "PYTHON:3.12"
+az webapp config set -n livrescan-backend -g livrescan-rg \
+  --startup-file "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+az webapp config appsettings set -n livrescan-backend -g livrescan-rg --settings \
+  LIVRESCAN_PROVIDER=groq GROQ_API_KEY=... OPENROUTER_API_KEY=... \
+  ANTHROPIC_API_KEY=... SCM_DO_BUILD_DURING_DEPLOYMENT=true
+```
+
+Redeploy po změně kódu:
+
+```bash
+cd backend
+zip -r /tmp/livrescan_backend.zip app requirements.txt -x "*.pyc" -x "__pycache__/*"
+az webapp deploy -g livrescan-rg -n livrescan-backend \
+  --src-path /tmp/livrescan_backend.zip --type zip
+```
+
+### Proč ne Azure Container Apps
+
+Původně jsme běželi na Container Apps (Docker image), ale `az containerapp
+up` si u toho **automaticky založí Azure Container Registry (Basic SKU)**,
+a ten na rozdíl od Container Apps samotných **nemá žádnou free tier
+variantu** — účtuje se paušálně bez ohledu na využití (~€0.66/měsíc,
+zjištěno přes Cost Management). Container App sama o sobě stála skoro nic
+(škáluje na 0 instancí, když nic neděláš), ale registr tikal pořád.
+
+Řešení: App Service umí Python nativně bez kontejneru vůbec, takže odpadá
+potřeba jakéhokoli registru. Container App + jeho prostředí + Log
+Analytics workspace jsme smazali (registr smazán jako první, což na pár
+minut backend fakticky vyřadilo z provozu, než jsme přešli na App
+Service — bacha na pořadí, kdyby se tohle dělalo znovu).
+
 ## Co tu (zatím) není
 
 - Autentizace / rate limiting — pro lokální vývoj nepotřeba, před nasazením
   do produkce přidat (např. API klíč appky + limit requestů na zařízení).
-- Nasazení — funguje jako běžná ASGI appka, jde hostit kdekoli (Fly.io,
-  Render, Railway, Cloud Run...) příkazem
-  `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
