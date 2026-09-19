@@ -61,6 +61,7 @@ dependencies:
   # Value equality for entities
   freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:

@@ -21,7 +21,7 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/scan/review',
       builder: (context, state) => ScanResultScreen(
-        imageBytes: state.extra as Uint8List,
+        images: state.extra as List<Uint8List>,
       ),
     ),
     GoRoute(

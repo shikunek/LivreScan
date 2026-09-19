@@ -32,6 +32,8 @@ core/
   storage/  # Drift AppDatabase (tabulky Decks, Cards → DeckRow/CardRow)
   di/       # providers.dart — Riverpod DI pro celý graf závislostí
   constants.dart  # výchozí jazyky, backend URL (dart-define)
+  languages.dart  # seznam podporovaných jazyků (kód, český název, canScan)
+  settings/       # LanguageSettingsNotifier — zvolená dvojice jazyků (shared_preferences)
 features/
   scan/
     domain/       # VocabCandidate, ScanRepository (abstract), ScanPageUseCase
@@ -41,7 +43,7 @@ features/
     domain/       # Flashcard, Deck, FlashcardRepository (abstract)
     data/          # FlashcardRepositoryImpl nad Drift DB
     presentation/  # DeckListScreen, ReviewScreen, ReviewController (Riverpod)
-shared/            # sdílené widgety/extension metody napříč features
+shared/            # sdílené widgety napříč features (LanguagePairBar — výběr jazyků)
 ```
 
 Pravidlo vrstev: `domain` nezná Flutter ani konkrétní DB/síť — jen entity a

@@ -16,4 +16,10 @@ class GalleryPicker {
     if (file == null) return null;
     return file.readAsBytes();
   }
+
+  /// Lets the user pick several page photos from the gallery at once.
+  Future<List<Uint8List>> pickMultipleImages() async {
+    final files = await _picker.pickMultiImage(maxWidth: 2400, imageQuality: 90);
+    return [for (final file in files) await file.readAsBytes()];
+  }
 }

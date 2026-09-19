@@ -4,16 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/constants.dart';
+import '../../../../core/settings/language_settings.dart';
 import '../../../flashcards/domain/entities/flashcard.dart';
 import '../providers/scan_controller.dart';
 
 /// Runs OCR + extraction automatically as soon as it opens (no user
-/// selection step) and shows what got added to the deck.
+/// selection step) and shows what got added to the deck. Accepts one or
+/// several page photos, processed in order and merged into one save.
 class ScanResultScreen extends ConsumerStatefulWidget {
-  const ScanResultScreen({super.key, required this.imageBytes});
+  const ScanResultScreen({super.key, required this.images});
 
-  final Uint8List imageBytes;
+  final List<Uint8List> images;
 
   @override
   ConsumerState<ScanResultScreen> createState() => _ScanResultScreenState();
@@ -23,29 +24,37 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() {
-      ref.read(scanControllerProvider.notifier).processAndSave(
-            imageBytes: widget.imageBytes,
-            sourceLang: kDefaultSourceLang,
-            targetLang: kDefaultTargetLang,
-          );
-    });
+    Future.microtask(_run);
+  }
+
+  void _run() {
+    final languages = ref.read(languageSettingsProvider);
+    ref.read(scanControllerProvider.notifier).processAndSave(
+          images: widget.images,
+          sourceLang: languages.source,
+          targetLang: languages.target,
+        );
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(scanControllerProvider);
+    final progress = ref.watch(scanProgressProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Nové kartičky')),
       body: state.when(
-        loading: () => const Center(
+        loading: () => Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Rozpoznávám text a hledám slovíčka…'),
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(
+                progress == null || progress.total <= 1
+                    ? 'Rozpoznávám text a hledám slovíčka…'
+                    : 'Zpracovávám stránku ${progress.current} z ${progress.total}…',
+              ),
             ],
           ),
         ),
@@ -57,14 +66,10 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> {
               children: [
                 const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
                 const SizedBox(height: 12),
-                Text('Nepodařilo se zpracovat fotku:\n$error', textAlign: TextAlign.center),
+                Text('Nepodařilo se zpracovat fotky:\n$error', textAlign: TextAlign.center),
                 const SizedBox(height: 20),
                 FilledButton(
-                  onPressed: () => ref.read(scanControllerProvider.notifier).processAndSave(
-                        imageBytes: widget.imageBytes,
-                        sourceLang: kDefaultSourceLang,
-                        targetLang: kDefaultTargetLang,
-                      ),
+                  onPressed: _run,
                   child: const Text('Zkusit znovu'),
                 ),
               ],
@@ -85,7 +90,7 @@ class _ResultList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (cards.isEmpty) {
-      return const Center(child: Text('Na téhle stránce se nenašla žádná nová slovíčka.'));
+      return const Center(child: Text('Na těchhle stránkách se nenašla žádná nová slovíčka.'));
     }
 
     return Column(

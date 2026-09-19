@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/languages.dart';
+import '../../../../shared/widgets/language_pair_bar.dart';
 import '../../domain/entities/deck.dart';
 import '../providers/decks_provider.dart';
 
@@ -14,32 +16,39 @@ class DeckListScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('LivreScan')),
-      body: RefreshIndicator(
-        onRefresh: () => ref.refresh(decksProvider.future),
-        child: decks.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => _ErrorState(
-            error: error,
-            onRetry: () => ref.invalidate(decksProvider),
-          ),
-          data: (decks) => decks.isEmpty
-              ? ListView(
-                  children: const [
-                    Padding(
-                      padding: EdgeInsets.only(top: 120),
-                      child: Center(child: Text('Zatím žádné decky. Naskenuj stránku knihy.')),
-                    ),
-                  ],
-                )
-              : ListView.separated(
-                  itemCount: decks.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final deck = decks[index];
-                    return _DeckTile(deck: deck);
-                  },
+      body: Column(
+        children: [
+          const LanguagePairBar(),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () => ref.refresh(decksProvider.future),
+              child: decks.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, _) => _ErrorState(
+                  error: error,
+                  onRetry: () => ref.invalidate(decksProvider),
                 ),
-        ),
+                data: (decks) => decks.isEmpty
+                    ? ListView(
+                        children: const [
+                          Padding(
+                            padding: EdgeInsets.only(top: 120),
+                            child: Center(child: Text('Zatím žádné decky. Naskenuj stránku knihy.')),
+                          ),
+                        ],
+                      )
+                    : ListView.separated(
+                        itemCount: decks.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final deck = decks[index];
+                          return _DeckTile(deck: deck);
+                        },
+                      ),
+              ),
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/scan'),
@@ -59,7 +68,9 @@ class _DeckTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       title: Text(deck.name),
-      subtitle: Text('${deck.sourceLang} → ${deck.targetLang}'),
+      subtitle: Text(
+        '${languageByCode(deck.sourceLang).name} → ${languageByCode(deck.targetLang).name}',
+      ),
       trailing: const Icon(Icons.chevron_right),
       onTap: () => context.push('/deck/${deck.id}/review'),
     );

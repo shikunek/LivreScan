@@ -6,8 +6,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/camera/gallery_picker.dart';
 
-/// Lets the user photograph a book page (or pick one from the gallery),
-/// then confirm it before it's sent off for OCR + vocabulary extraction.
+/// Lets the user photograph one or more book pages (or pick them from the
+/// gallery), building up a queue of pages that all get sent off for
+/// OCR + vocabulary extraction together once they tap "Hotovo".
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
 
@@ -24,6 +25,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   FlashMode _flashMode = FlashMode.off;
 
   Uint8List? _capturedBytes;
+  final List<Uint8List> _pages = [];
 
   @override
   void initState() {
@@ -66,7 +68,9 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
       final controller = CameraController(
         backCamera,
-        ResolutionPreset.high,
+        // 4K: sharp preview, and the captured page keeps enough detail for
+        // OCR to read small print (`high` is only 720p on iOS).
+        ResolutionPreset.ultraHigh,
         enableAudio: false,
       );
 
@@ -99,9 +103,9 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   Future<void> _pickFromGallery() async {
-    final bytes = await _galleryPicker.pickImage();
-    if (bytes == null) return;
-    setState(() => _capturedBytes = bytes);
+    final images = await _galleryPicker.pickMultipleImages();
+    if (images.isEmpty) return;
+    setState(() => _pages.addAll(images));
   }
 
   Future<void> _toggleFlash() async {
@@ -114,10 +118,22 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   void _retake() => setState(() => _capturedBytes = null);
 
-  void _usePhoto() {
+  /// Keeps the captured page and returns to the live camera so the user
+  /// can photograph the next one, instead of leaving the screen.
+  void _keepPageAndContinue() {
     final bytes = _capturedBytes;
     if (bytes == null) return;
-    context.push('/scan/review', extra: bytes);
+    setState(() {
+      _pages.add(bytes);
+      _capturedBytes = null;
+    });
+  }
+
+  void _removePage(int index) => setState(() => _pages.removeAt(index));
+
+  void _finish() {
+    if (_pages.isEmpty) return;
+    context.push('/scan/review', extra: List<Uint8List>.of(_pages));
   }
 
   @override
@@ -127,7 +143,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('Skenovat stránku'),
+        title: Text(_pages.isEmpty ? 'Skenovat stránku' : 'Skenovat stránky (${_pages.length})'),
       ),
       body: SafeArea(child: _buildBody()),
     );
@@ -137,8 +153,9 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     if (_capturedBytes != null) {
       return _CapturePreview(
         bytes: _capturedBytes!,
+        hasMorePages: _pages.isNotEmpty,
         onRetake: _retake,
-        onUse: _usePhoto,
+        onKeep: _keepPageAndContinue,
       );
     }
 
@@ -161,9 +178,12 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         return _CameraLiveView(
           controller: controller,
           flashMode: _flashMode,
+          pages: _pages,
           onToggleFlash: _toggleFlash,
           onCapture: _capture,
           onPickFromGallery: _pickFromGallery,
+          onRemovePage: _removePage,
+          onFinish: _finish,
         );
       },
     );
@@ -174,28 +194,31 @@ class _CameraLiveView extends StatelessWidget {
   const _CameraLiveView({
     required this.controller,
     required this.flashMode,
+    required this.pages,
     required this.onToggleFlash,
     required this.onCapture,
     required this.onPickFromGallery,
+    required this.onRemovePage,
+    required this.onFinish,
   });
 
   final CameraController controller;
   final FlashMode flashMode;
+  final List<Uint8List> pages;
   final VoidCallback onToggleFlash;
   final VoidCallback onCapture;
   final VoidCallback onPickFromGallery;
+  final ValueChanged<int> onRemovePage;
+  final VoidCallback onFinish;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Center(
-          child: AspectRatio(
-            aspectRatio: controller.value.aspectRatio,
-            child: CameraPreview(controller),
-          ),
-        ),
+        // CameraPreview already applies the correct (orientation-aware)
+        // aspect ratio itself; wrapping it in another AspectRatio distorts it.
+        Center(child: CameraPreview(controller)),
         // Framing guide so the user lines the page up straight.
         Positioned.fill(
           child: IgnorePointer(
@@ -226,19 +249,86 @@ class _CameraLiveView extends StatelessWidget {
           left: 0,
           right: 0,
           bottom: 24,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                onPressed: onPickFromGallery,
-                icon: const Icon(Icons.photo_library, color: Colors.white, size: 32),
+              if (pages.isNotEmpty) ...[
+                _PageThumbnailStrip(pages: pages, onRemove: onRemovePage),
+                const SizedBox(height: 12),
+              ],
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  IconButton(
+                    onPressed: onPickFromGallery,
+                    icon: const Icon(Icons.photo_library, color: Colors.white, size: 32),
+                  ),
+                  _ShutterButton(onPressed: onCapture),
+                  const SizedBox(width: 48),
+                ],
               ),
-              _ShutterButton(onPressed: onCapture),
-              const SizedBox(width: 48),
+              if (pages.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: FilledButton.icon(
+                    onPressed: onFinish,
+                    icon: const Icon(Icons.check),
+                    label: Text('Hotovo — zpracovat ${pages.length} ${_pageWord(pages.length)}'),
+                  ),
+                ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+String _pageWord(int count) {
+  if (count == 1) return 'stránku';
+  if (count >= 2 && count <= 4) return 'stránky';
+  return 'stránek';
+}
+
+class _PageThumbnailStrip extends StatelessWidget {
+  const _PageThumbnailStrip({required this.pages, required this.onRemove});
+
+  final List<Uint8List> pages;
+  final ValueChanged<int> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 64,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: pages.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(pages[index], width: 48, height: 64, fit: BoxFit.cover),
+              ),
+              Positioned(
+                top: -8,
+                right: -8,
+                child: GestureDetector(
+                  onTap: () => onRemove(index),
+                  child: const CircleAvatar(
+                    radius: 10,
+                    backgroundColor: Colors.black87,
+                    child: Icon(Icons.close, size: 14, color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -269,11 +359,17 @@ class _ShutterButton extends StatelessWidget {
 }
 
 class _CapturePreview extends StatelessWidget {
-  const _CapturePreview({required this.bytes, required this.onRetake, required this.onUse});
+  const _CapturePreview({
+    required this.bytes,
+    required this.hasMorePages,
+    required this.onRetake,
+    required this.onKeep,
+  });
 
   final Uint8List bytes;
+  final bool hasMorePages;
   final VoidCallback onRetake;
-  final VoidCallback onUse;
+  final VoidCallback onKeep;
 
   @override
   Widget build(BuildContext context) {
@@ -295,9 +391,9 @@ class _CapturePreview extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: onUse,
+                  onPressed: onKeep,
                   icon: const Icon(Icons.check),
-                  label: const Text('Použít fotku'),
+                  label: Text(hasMorePages ? 'Přidat stránku' : 'Použít fotku'),
                 ),
               ),
             ],
@@ -330,7 +426,7 @@ class _CameraError extends StatelessWidget {
             FilledButton(onPressed: onRetry, child: const Text('Zkusit znovu')),
             TextButton(
               onPressed: onPickFromGallery,
-              child: const Text('Vybrat fotku z galerie'),
+              child: const Text('Vybrat fotky z galerie'),
             ),
           ],
         ),
