@@ -36,6 +36,14 @@ class FlashcardRepositoryImpl implements FlashcardRepository {
   }
 
   @override
+  Future<void> deleteDeck(int deckId) {
+    return _db.transaction(() async {
+      await (_db.delete(_db.cards)..where((c) => c.deckId.equals(deckId))).go();
+      await (_db.delete(_db.decks)..where((d) => d.id.equals(deckId))).go();
+    });
+  }
+
+  @override
   Future<Deck> getOrCreateDefaultDeck({
     required String sourceLang,
     required String targetLang,
@@ -84,6 +92,15 @@ class FlashcardRepositoryImpl implements FlashcardRepository {
       }
       return saved;
     });
+  }
+
+  @override
+  Future<List<Flashcard>> getCards(int deckId) async {
+    final rows = await (_db.select(_db.cards)
+          ..where((c) => c.deckId.equals(deckId))
+          ..orderBy([(c) => OrderingTerm.desc(c.id)]))
+        .get();
+    return rows.map(_flashcardFromRow).toList();
   }
 
   @override

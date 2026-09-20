@@ -143,7 +143,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: Text(_pages.isEmpty ? 'Skenovat stránku' : 'Skenovat stránky (${_pages.length})'),
+        // The theme's AppBar title is dark ink; this screen is black.
+        title: Text(
+          _pages.isEmpty ? 'Skenovat stránku' : 'Skenovat stránky (${_pages.length})',
+          style: const TextStyle(color: Colors.white),
+        ),
       ),
       body: SafeArea(child: _buildBody()),
     );

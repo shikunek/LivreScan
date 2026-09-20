@@ -12,6 +12,9 @@ abstract class FlashcardRepository {
     required String targetLang,
   });
 
+  /// Deletes the deck together with all of its cards.
+  Future<void> deleteDeck(int deckId);
+
   /// Returns the deck for this language pair, creating it on first use.
   /// Lets the scan flow save cards without the user having to pick/create
   /// a deck by hand.
@@ -25,6 +28,9 @@ abstract class FlashcardRepository {
     required int deckId,
     required List<VocabCandidate> candidates,
   });
+
+  /// Every card in the deck, newest first.
+  Future<List<Flashcard>> getCards(int deckId);
 
   Future<List<Flashcard>> getDueCards(int deckId);
 

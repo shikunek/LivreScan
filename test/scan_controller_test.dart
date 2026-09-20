@@ -55,6 +55,12 @@ class _InMemoryFlashcardRepository implements FlashcardRepository {
   }
 
   @override
+  Future<void> deleteDeck(int deckId) async {
+    cards.removeWhere((c) => c.deckId == deckId);
+    decks.removeWhere((d) => d.id == deckId);
+  }
+
+  @override
   Future<Deck> getOrCreateDefaultDeck({
     required String sourceLang,
     required String targetLang,
@@ -86,6 +92,10 @@ class _InMemoryFlashcardRepository implements FlashcardRepository {
     cards.addAll(saved);
     return saved;
   }
+
+  @override
+  Future<List<Flashcard>> getCards(int deckId) async =>
+      cards.where((c) => c.deckId == deckId).toList().reversed.toList();
 
   @override
   Future<List<Flashcard>> getDueCards(int deckId) async =>

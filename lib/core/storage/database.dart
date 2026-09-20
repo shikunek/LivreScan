@@ -41,6 +41,9 @@ class Cards extends Table {
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
+  /// For tests: run against e.g. `NativeDatabase.memory()`.
+  AppDatabase.forTesting(super.e);
+
   @override
   int get schemaVersion => 1;
 

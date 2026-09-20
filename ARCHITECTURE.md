@@ -23,7 +23,7 @@ appka za tebe rozhodne, co stojí za naučení.
 ## Struktura `lib/`
 
 ```
-app/        # MaterialApp.router, go_router routy, theme
+app/        # MaterialApp.router, go_router routy, theme.dart (paleta, serif, tlačítka)
 core/
   ocr/      # TextRecognizerService — wrapper nad ML Kit
   camera/   # GalleryPicker (image_picker fallback ke kameře)
@@ -42,7 +42,7 @@ features/
   flashcards/
     domain/       # Flashcard, Deck, FlashcardRepository (abstract)
     data/          # FlashcardRepositoryImpl nad Drift DB
-    presentation/  # DeckListScreen, ReviewScreen, ReviewController (Riverpod)
+    presentation/  # DeckListScreen, WordListScreen, ReviewScreen, ReviewController (Riverpod)
 shared/            # sdílené widgety napříč features (LanguagePairBar — výběr jazyků)
 ```
 
@@ -99,11 +99,15 @@ byl snadný, kontrakt `/extract` na tom nezávisí.
 - `CameraScreen` — živý náhled, foto/retake, výběr z galerie
 - `ScanResultScreen` + `ScanController` — po vyfocení automaticky OCR →
   extrakce → uložení všech kandidátů, žádný krok navíc od uživatele
-- `ReviewScreen` + `ReviewController` — kartička s tap-to-reveal, 4 SM-2
-  tlačítka (Znovu/Těžké/Dobré/Lehké), fronta due karet se po ohodnocení
-  zmenšuje bez nutnosti znovu načítat z DB
-- `DeckListScreen` + `decksProvider` — reálné decky z DB (`FutureProvider.autoDispose`
-  + pull-to-refresh), tap na deck vede na `/deck/:id/review`
+- `ReviewScreen` + `ReviewController` — kartička s tap-to-reveal, 3 hodnoticí
+  smajlíky (😞 Znovu / 😐 Těžké / 😊 Dobré → SM-2 `again`/`hard`/`good`), fronta
+  due karet se po ohodnocení zmenšuje bez nutnosti znovu načítat z DB
+- `DeckListScreen` + `decksProvider` — reálné decky z DB (`AsyncNotifier`,
+  autoDispose, pull-to-refresh), tap na deck vede na `/deck/:id/review`,
+  posun zprava doleva vysune „Smazat“, klepnutí na něj deck smaže (i s kartičkami)
+- `WordListScreen` (`/deck/:id/words`) — seznam všech slovíček decku, nejnovější první;
+  otevírá se ikonou seznamu v řádku decku
+- Výběr jazykové dvojice (`LanguagePairBar`), jeden deck na směrovou dvojici
 - DI graf (`core/di/providers.dart`) propojující všechny vrstvy
 - Routing (go_router)
 - Backend (`backend/`) — FastAPI `/extract`, ověřený lokálním under-testem
@@ -113,10 +117,10 @@ byl snadný, kontrakt `/extract` na tom nezávisí.
   odzkoušené naživo na emulátoru)
 
 **TODO:**
-- Volba jazyků v UI (teď natvrdo `fr → cs` v `core/constants.dart`)
-- Vytváření/mazání decků ručně v UI (teď se deck založí jen automaticky
+- Ruční vytváření/přejmenování decků v UI (deck se zakládá jen automaticky
   při prvním skenu jazykové dvojice)
-- Nasazení backendu někam mimo localhost + auth/rate-limiting
+- Kontrola duplicit při opakovaném skenu stejné stránky
+- Auth/rate-limiting backendu
 - Známé omezení: Google ML Kit iOS binárky nemají arm64 slice pro simulátor
   (Apple Silicon) — OCR flow lze živě otestovat jen na reálném iPhonu nebo
   v Android emulátoru/zařízení

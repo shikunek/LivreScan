@@ -56,7 +56,12 @@ VOCAB_SCHEMA = {
                 "properties": {
                     "original": {
                         "type": "string",
-                        "description": "The word or phrase exactly as it appears in the source text",
+                        "description": (
+                            "The dictionary form of ONE learnable unit: a verb in the "
+                            "infinitive, a noun with its article, an adjective in its base "
+                            "form, or a fixed multi-word expression. Not a free-form chunk "
+                            "of the sentence."
+                        ),
                     },
                     "translation": {"type": "string"},
                     "type": {"type": "string", "enum": ["word", "phrase"]},
@@ -83,14 +88,39 @@ def build_prompt(text: str, source_lang: str, target_lang: str, max_items: int) 
         "You are helping a language learner build flashcards from a scanned book page.\n"
         f"Source language: {source_lang}. Target (translation) language: {target_lang}.\n"
         f"From the OCR text below (it may contain OCR noise/errors -- ignore garbage), "
-        f"pick up to {max_items} of the most useful words and phrases for a learner to study: "
-        "prioritize words/idioms that are common enough to be worth learning but not trivially "
-        "basic, and multi-word phrases/idioms that don't translate literally. Skip proper nouns, "
-        "numbers, and OCR garbage.\n"
-        f"For each item give: the exact original form, a natural translation into {target_lang}, "
-        "whether it's a 'word' or 'phrase', its part of speech (for words), an example sentence "
-        "(reuse one from the text if a good one exists, otherwise write a short natural one), and "
-        "an estimated CEFR difficulty (A1-C2).\n\n"
+        f"pick up to {max_items} of the most useful items for a learner to study: "
+        "common enough to be worth learning but not trivially basic. Skip proper nouns, "
+        "numbers, and OCR garbage.\n\n"
+        "Split the text into SMALL learnable units. One flashcard = one unit, never a whole "
+        "clause or a free combination of words. Take the words apart, for example (French): "
+        "'regardait par la fenetre' becomes two cards, 'regarder' and 'la fenetre' -- not "
+        "one card with the whole chunk.\n"
+        "Write every item in its DICTIONARY FORM, not as it is printed in the text:\n"
+        "- Verbs: the infinitive ('regardait' -> 'regarder', 'nous sommes alles' -> 'aller'; "
+        "keep reflexive pronouns: 'se souvenir').\n"
+        "- Nouns: always WITH their article, so the gender is learned with the word "
+        "('la fenetre', 'le livre', 'un arbre'; in German 'der/die/das', in Spanish 'el/la', "
+        "etc.). ALWAYS the singular, even when the text has a plural ('les enfants' -> "
+        "'un enfant', 'des livres' -> 'un livre'). If the definite article would be elided "
+        "(French l'), use the indefinite article instead ('un arbre') so the gender stays "
+        "visible. For languages without articles just give the noun in its base form.\n"
+        "- Adjectives: the base form (French masculine singular: 'grande' -> 'grand'). "
+        "Other words (adverbs, prepositions, conjunctions): as they are.\n"
+        "Keep words together ONLY when they form a fixed expression or idiom whose meaning "
+        "is not obvious from the single words. Such an expression is ONE card, never split "
+        "into its parts (French: 'il pleuvait a verse' -> the single phrase 'pleuvoir a "
+        "verse', not 'pleuvoir' + 'a verse'; 'avoir besoin de'; 'il y a'). Those get type "
+        "'phrase', in their base form (infinitive for verbs). Ordinary combinations such as "
+        "verb + preposition + noun ('regardait par la fenetre') are NOT fixed expressions: "
+        "split them. Everything else is type 'word' (a noun with its article still counts as "
+        "one 'word'). Give each dictionary form only once, even if it appears several "
+        "times.\n\n"
+        f"For each item give: the dictionary form as described above, a natural translation "
+        f"into {target_lang} (also in its dictionary form: infinitive, singular; add the article "
+        "only if the target language uses them), 'word' or 'phrase', the part of speech, an "
+        "example sentence (reuse the sentence from the text where the item occurs -- it may "
+        "contain the inflected form -- otherwise write a short natural one), and an "
+        "estimated CEFR difficulty (A1-C2).\n\n"
         f"Text:\n{text}"
     )
 

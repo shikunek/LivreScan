@@ -1,6 +1,8 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/theme.dart';
 import '../../core/languages.dart';
 import '../../core/settings/language_settings.dart';
 
@@ -15,12 +17,11 @@ class LanguagePairBar extends ConsumerWidget {
     final notifier = ref.read(languageSettingsProvider.notifier);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 14),
       child: Row(
         children: [
-          Expanded(
-            child: _LanguageChip(
-              label: 'Skenuji z',
+          Flexible(
+            child: _LanguagePill(
               language: languageByCode(pair.source),
               onTap: () async {
                 final code = await _pickLanguage(
@@ -35,14 +36,24 @@ class LanguagePairBar extends ConsumerWidget {
               },
             ),
           ),
-          IconButton(
-            tooltip: 'Prohodit jazyky',
-            onPressed: notifier.canSwap ? notifier.swap : null,
-            icon: const Icon(Icons.swap_horiz),
+          CupertinoButton(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            minimumSize: const Size(36, 36),
+            onPressed: notifier.canSwap
+                ? () {
+                    HapticFeedback.selectionClick();
+                    notifier.swap();
+                  }
+                : null,
+            child: const Icon(
+              CupertinoIcons.arrow_right_arrow_left,
+              size: 16,
+              color: AppColors.inkSecondary,
+              semanticLabel: 'Prohodit jazyky',
+            ),
           ),
-          Expanded(
-            child: _LanguageChip(
-              label: 'Překládám do',
+          Flexible(
+            child: _LanguagePill(
               language: languageByCode(pair.target),
               onTap: () async {
                 final code = await _pickLanguage(
@@ -61,85 +72,68 @@ class LanguagePairBar extends ConsumerWidget {
   }
 }
 
-class _LanguageChip extends StatelessWidget {
-  const _LanguageChip({required this.label, required this.language, required this.onTap});
+class _LanguagePill extends StatelessWidget {
+  const _LanguagePill({required this.language, required this.onTap});
 
-  final String label;
   final AppLanguage language;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(label, style: theme.textTheme.labelSmall),
-                    Text(
-                      language.name,
-                      style: theme.textTheme.titleSmall,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.outline, width: 0.5),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                language.name,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 14, color: AppColors.ink),
               ),
-              const Icon(Icons.arrow_drop_down),
-            ],
-          ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(CupertinoIcons.chevron_down, size: 12, color: AppColors.inkSecondary),
+          ],
         ),
       ),
     );
   }
 }
 
+/// iOS action sheet; the currently selected language is shown in bold.
 Future<String?> _pickLanguage(
   BuildContext context, {
   required String title,
   required String selected,
   required List<AppLanguage> languages,
 }) {
-  return showModalBottomSheet<String>(
+  return showCupertinoModalPopup<String>(
     context: context,
-    isScrollControlled: true,
-    builder: (context) {
-      return SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.7),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(title, style: Theme.of(context).textTheme.titleMedium),
-              ),
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  children: [
-                    for (final language in languages)
-                      ListTile(
-                        title: Text(language.name),
-                        trailing: language.code == selected ? const Icon(Icons.check) : null,
-                        onTap: () => Navigator.of(context).pop(language.code),
-                      ),
-                  ],
-                ),
-              ),
-            ],
+    builder: (context) => CupertinoActionSheet(
+      title: Text(title),
+      actions: [
+        for (final language in languages)
+          CupertinoActionSheetAction(
+            isDefaultAction: language.code == selected,
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              Navigator.of(context).pop(language.code);
+            },
+            child: Text(language.name),
           ),
-        ),
-      );
-    },
+      ],
+      cancelButton: CupertinoActionSheetAction(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Zrušit'),
+      ),
+    ),
   );
 }

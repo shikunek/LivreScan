@@ -1,9 +1,11 @@
 import 'dart:typed_data';
 
+import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../app/theme.dart';
 import '../../../../core/settings/language_settings.dart';
 import '../../../flashcards/domain/entities/flashcard.dart';
 import '../providers/scan_controller.dart';
@@ -48,7 +50,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const CircularProgressIndicator(),
+              const CupertinoActivityIndicator(radius: 14),
               const SizedBox(height: 16),
               Text(
                 progress == null || progress.total <= 1
@@ -64,7 +66,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+                Icon(Icons.error_outline, size: 48, color: Theme.of(context).colorScheme.error),
                 const SizedBox(height: 12),
                 Text('Nepodařilo se zpracovat fotky:\n$error', textAlign: TextAlign.center),
                 const SizedBox(height: 20),
@@ -108,9 +110,10 @@ class _ResultList extends StatelessWidget {
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final card = cards[index];
+              // The example sentence is still saved with the card, just not
+              // shown here for now.
               return ListTile(
                 title: Text(card.original),
-                subtitle: card.exampleSentence.isEmpty ? null : Text(card.exampleSentence),
                 trailing: Text(card.translation, style: Theme.of(context).textTheme.bodyMedium),
               );
             },
@@ -119,6 +122,7 @@ class _ResultList extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.all(16),
           child: FilledButton(
+            style: pillButtonStyle,
             onPressed: () => context.go('/'),
             child: const Text('Hotovo'),
           ),

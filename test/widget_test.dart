@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,13 +8,18 @@ import 'package:livrescan/core/settings/language_settings.dart';
 import 'package:livrescan/features/flashcards/domain/entities/deck.dart';
 import 'package:livrescan/features/flashcards/presentation/providers/decks_provider.dart';
 
+class _EmptyDecks extends DecksNotifier {
+  @override
+  Future<List<Deck>> build() async => const [];
+}
+
 Future<Widget> _app() async {
   SharedPreferences.setMockInitialValues({});
   final prefs = await SharedPreferences.getInstance();
   return ProviderScope(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(prefs),
-      decksProvider.overrideWith((ref) async => const <Deck>[]),
+      decksProvider.overrideWith(_EmptyDecks.new),
     ],
     child: const LivreScanApp(),
   );
@@ -25,7 +30,7 @@ void main() {
     await tester.pumpWidget(await _app());
     await tester.pumpAndSettle();
 
-    expect(find.text('LivreScan'), findsOneWidget);
+    expect(find.text('Decky'), findsOneWidget);
     expect(find.text('Skenovat stránku'), findsOneWidget);
   });
 
@@ -52,7 +57,7 @@ void main() {
     await tester.pumpWidget(await _app());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.swap_horiz));
+    await tester.tap(find.byIcon(CupertinoIcons.arrow_right_arrow_left));
     await tester.pumpAndSettle();
 
     final prefs = await SharedPreferences.getInstance();

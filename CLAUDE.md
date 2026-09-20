@@ -50,6 +50,18 @@ flutter run --release -d 00008110-000A043A1E45801E
   a gradle závislosti na Androidu (viz README pluginu google_mlkit_text_recognition).
   Cílový jazyk může být libovolný.
 
+## Vzhled
+
+Kombinace klidného stylu (krémové pozadí, jeden hlinitý akcent, patkové písmo)
+a iOS ovládání. Barvy (`AppColors`), `serifStyle()` a `pillButtonStyle` jsou v
+[lib/app/theme.dart](lib/app/theme.dart); nepoužívej natvrdo `Colors.*` pro věci,
+které mají být v paletě. Výběr jazyka je `CupertinoActionSheet`, mazání decku je
+`Slidable` (`flutter_slidable`): posun zprava doleva vysune „Smazat“, klepnutí smaže
+bez dalšího dialogu; `SlidableAutoCloseBehavior` kolem seznamu zavírá ostatní řádky, seznam decků má bounce scroll a
+`CupertinoSliverRefreshControl`, hlavní akce je tlačítko dole (ne FAB). Haptika přes
+`HapticFeedback`. Titulek `AppBar` z tématu je tmavý (`foregroundColor` se na něj
+neaplikuje), takže na černé obrazovce kamery má explicitně bílý styl.
+
 ## Pasti
 
 - Po skenu se musí zneplatnit `decksProvider` a `reviewControllerProvider(deckId)`

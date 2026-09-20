@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/flashcards/presentation/screens/deck_list_screen.dart';
 import '../features/flashcards/presentation/screens/review_screen.dart';
+import '../features/flashcards/presentation/screens/word_list_screen.dart';
 import '../features/scan/presentation/screens/camera_screen.dart';
 import '../features/scan/presentation/screens/scan_result_screen.dart';
 
@@ -22,6 +23,12 @@ final appRouter = GoRouter(
       path: '/scan/review',
       builder: (context, state) => ScanResultScreen(
         images: state.extra as List<Uint8List>,
+      ),
+    ),
+    GoRoute(
+      path: '/deck/:deckId/words',
+      builder: (context, state) => WordListScreen(
+        deckId: int.parse(state.pathParameters['deckId']!),
       ),
     ),
     GoRoute(

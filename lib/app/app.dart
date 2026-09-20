@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'router.dart';
+import 'theme.dart';
 
 class LivreScanApp extends StatelessWidget {
   const LivreScanApp({super.key});
@@ -9,7 +10,7 @@ class LivreScanApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       title: 'LivreScan',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+      theme: buildAppTheme(),
       routerConfig: appRouter,
     );
   }
