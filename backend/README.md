@@ -143,6 +143,33 @@ az webapp deploy -g livrescan-rg -n livrescan-backend \
   --src-path /tmp/livrescan_backend.zip --type zip
 ```
 
+### Automatické nasazení (GitHub Actions)
+
+Workflow [`.github/workflows/deploy-backend.yml`](../.github/workflows/deploy-backend.yml)
+nasadí backend při každém pushi do `main`, který změní něco v `backend/`
+(jde ho pustit i ručně: Actions → „Deploy backend to Azure“ → Run workflow).
+Před nasazením ověří, že se `app.main` naimportuje, zabalí totéž co ruční
+zip-deploy výš (jen `app` a `requirements.txt`, žádné `.env` ani `.venv`)
+a po nasazení zavolá `/health`.
+
+Jednorázové nastavení — uložit publish profile jako secret repozitáře:
+
+```bash
+az webapp deployment list-publishing-profiles -g livrescan-rg \
+  -n livrescan-backend --xml \
+  | gh secret set AZURE_WEBAPP_PUBLISH_PROFILE --repo shikunek/LivreScan
+```
+
+(nebo ručně: GitHub → Settings → Secrets and variables → Actions → New
+repository secret, jméno `AZURE_WEBAPP_PUBLISH_PROFILE`, hodnota je celý XML
+výstup příkazu bez `| gh …`). Klíče k LLM providerům (`GROQ_API_KEY` apod.) a
+`LIVRESCAN_PROVIDER` zůstávají v Azure app settings, workflow je nemění a
+nepotřebuje.
+
+Když nasazení skončí chybou 401/403, je vypnuté SCM basic auth: v portálu
+Configuration → General settings → „SCM Basic Auth Publishing Credentials“
+zapnout.
+
 ### Proč ne Azure Container Apps
 
 Původně jsme běželi na Container Apps (Docker image), ale `az containerapp

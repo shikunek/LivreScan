@@ -1,0 +1,65 @@
+name: Deploy backend to Azure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  # Manual run: Actions -> "Deploy backend to Azure" -> Run workflow.
+  workflow_dispatch:
+
+# Never run two deployments at once; let a running one finish.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AZURE_WEBAPP_NAME: livrescan-backend
+  # Same runtime as the App Service (PYTHON:3.12).
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # Fails the deployment early on a broken import or a bad dependency pin.
+      - name: Install dependencies and check that the app imports
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          python -c "import app.main"
+
+      # Same package as the manual zip deploy in backend/README.md: only the
+      # source and requirements.txt. Azure installs the dependencies itself
+      # (SCM_DO_BUILD_DURING_DEPLOYMENT=true), so no .venv and no .env here.
+      - name: Package
+        working-directory: backend
+        run: zip -r ../livrescan_backend.zip app requirements.txt -x "*.pyc" -x "*/__pycache__/*"
+
+      - name: Deploy to Azure App Service
+        id: deploy
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: livrescan_backend.zip
+
+      # The Free tier cold-starts slowly and Azure builds the app after the
+      # upload, so give it a couple of minutes before calling it a failure.
+      - name: Health check
+        run: |
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 10 --retry-all-errors \
+            "${{ steps.deploy.outputs.webapp-url }}/health"
