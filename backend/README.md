@@ -147,28 +147,40 @@ az webapp deploy -g livrescan-rg -n livrescan-backend \
 
 Workflow [`.github/workflows/deploy-backend.yml`](../.github/workflows/deploy-backend.yml)
 nasadí backend při každém pushi do `main`, který změní něco v `backend/`
-(jde ho pustit i ručně: Actions → „Deploy backend to Azure“ → Run workflow).
-Před nasazením ověří, že se `app.main` naimportuje, zabalí totéž co ruční
-zip-deploy výš (jen `app` a `requirements.txt`, žádné `.env` ani `.venv`)
-a po nasazení zavolá `/health`.
+(jde ho pustit i ručně z větve `main`: Actions → „Deploy backend to Azure“ →
+Run workflow). Před nasazením ověří, že se `app.main` naimportuje, zabalí
+totéž co ruční zip-deploy výš (jen `app` a `requirements.txt`, žádné `.env`
+ani `.venv`), nasadí přes `az webapp deploy` a po nasazení zavolá `/health`.
 
-Jednorázové nastavení — uložit publish profile jako secret repozitáře:
+Přihlášení do Azure je **OIDC (bez hesla)**: GitHub při běhu vystaví token a
+Azure mu důvěřuje jen pro tenhle repozitář a větev `main`. Publish profile ani
+SCM basic auth se nepoužívá (basic auth je na aplikaci vypnuté a má být).
 
-```bash
-az webapp deployment list-publishing-profiles -g livrescan-rg \
-  -n livrescan-backend --xml \
-  | gh secret set AZURE_WEBAPP_PUBLISH_PROFILE --repo shikunek/LivreScan
-```
+V Azure už je všechno připravené: identita `oidc-msi-8884` ve skupině
+`livrescan-rg` (vytvořil ji průvodce Deployment Center) má federovaný přístup
+pro `main` tohoto repa a roli `Website Contributor` na `livrescan-backend`.
+Nic dalšího zakládat nemusíš. Do GitHubu (Settings → Secrets and variables →
+Actions → New repository secret) stačí uložit tři hodnoty, které nejsou tajné
+jako heslo, ale patří do secretů:
 
-(nebo ručně: GitHub → Settings → Secrets and variables → Actions → New
-repository secret, jméno `AZURE_WEBAPP_PUBLISH_PROFILE`, hodnota je celý XML
-výstup příkazu bez `| gh …`). Klíče k LLM providerům (`GROQ_API_KEY` apod.) a
-`LIVRESCAN_PROVIDER` zůstávají v Azure app settings, workflow je nemění a
-nepotřebuje.
+| Secret | Hodnota zjistíš |
+|---|---|
+| `AZURE_CLIENT_ID` | `az identity show -g livrescan-rg -n oidc-msi-8884 --query clientId -o tsv` |
+| `AZURE_TENANT_ID` | `az account show --query tenantId -o tsv` |
+| `AZURE_SUBSCRIPTION_ID` | `az account show --query id -o tsv` |
 
-Když nasazení skončí chybou 401/403, je vypnuté SCM basic auth: v portálu
-Configuration → General settings → „SCM Basic Auth Publishing Credentials“
-zapnout.
+Klíče k LLM providerům (`GROQ_API_KEY` apod.) a `LIVRESCAN_PROVIDER` zůstávají
+v Azure app settings, workflow je nemění a nepotřebuje.
+
+Poznámky:
+- Federovaný přístup je vázaný na `refs/heads/main`, takže ruční běh z jiné
+  větve se nepřihlásí.
+- Subject v té identitě je ve formátu s ID (`repo:<owner>@<id>/<repo>@<id>:ref:…`),
+  ne `repo:owner/repo:ref:…`. Kdyby ses identitu někdy zakládal ručně, nejdřív
+  zjisti, jaký subject GitHub pro repo skutečně vystavuje, jinak se přihlášení
+  nepovede (`AADSTS70021`).
+- Starý secret `AZURE_WEBAPP_PUBLISH_PROFILE` už se nepoužívá a obsahuje
+  přihlašovací údaje k nasazení, smaž ho.
 
 ### Proč ne Azure Container Apps
 
