@@ -24,6 +24,23 @@ za rychlost; přepnutí zpět na `openrouter` je jen změna proměnné
 prostředí, bez redeploy (`az webapp config appsettings set -n
 livrescan-backend -g livrescan-rg --settings LIVRESCAN_PROVIDER=openrouter`).
 
+**Limit free tieru Groqu:** `gpt-oss-120b` má 8 000 tokenů za minutu a jedna
+stránka jich spotřebuje ~2 800, takže se vejdou zhruba 2–3 stránky za minutu.
+Při překročení Groq vrátí `429`; backend na to čeká podle `Retry-After` a
+zkusí to znovu (až 6×), takže víc stránek za sebou jen trvá déle. Když to
+přesto nevyjde, appce vrací `429` (vytížený model) nebo `502`, ne holou `500`.
+Občasné `400 tool_use_failed` (model si vymyslel neplatný `type`) se opakuje
+až 3×.
+
+## Testy
+
+```bash
+cd backend
+python -m unittest discover -s tests -v
+```
+
+Běží i v GitHub Actions před každým nasazením.
+
 ## Spuštění lokálně
 
 ```bash
@@ -60,6 +77,73 @@ Flutter appka čte backend URL z `LIVRESCAN_BACKEND_URL` (default
   ```bash
   flutter run --dart-define=LIVRESCAN_BACKEND_URL=http://192.168.1.23:8787
   ```
+
+## Auth a kvóty
+
+`/extract` (ne `/health`) vyžaduje dvě hlavičky:
+
+- **`X-Device-Id`** — libovolný neprázdný řetězec, appka si při prvním
+  spuštění vygeneruje náhodné ID a uloží ho lokálně
+  (`lib/core/network/device_id.dart`). Podle něj se počítá denní kvóta na
+  zařízení (`LIVRESCAN_DAILY_PAGE_LIMIT`, výchozí 20 stránek/den, `<= 0`
+  kvótu vypne). Kvóta se drží v SQLite (`app/quota.py`) — na Azure v
+  `/home/data/usage.db` (přežije restart kontejneru, běžný soubor by
+  nepřežil), lokálně `backend/usage.db` (gitignored).
+- **`X-App-Key`** — sdílený klíč appky, kontroluje se, jen když je na
+  serveru nastavená proměnná `LIVRESCAN_APP_KEY` (výchozí prázdná = bez
+  kontroly). Appka ho posílá jen pokud byla sestavená s
+  `--dart-define=LIVRESCAN_APP_KEY=...` (viz `lib/core/constants.dart`).
+
+Chybějící/špatná hlavička vrací `401`, vyčerpaná kvóta `429` — appka to
+ukazuje jako srozumitelnou hlášku
+(`lib/features/scan/presentation/screens/scan_result_screen.dart`).
+
+**Tohle je lehká obrana, ne kryptografické ověření appky.** `X-App-Key` je
+napevno v appce a jde z ní vytáhnout zpětnou analýzou; `X-Device-Id` si
+appka volí sama, takže ho jde napodobit. Zabrání to náhodnému zneužití
+(kdokoli, kdo zná URL a zavolá ji curlem), ne cílenému útoku. Silnější
+ochrana (Apple App Attest / Android Play Integrity) je až budoucí krok,
+pokud appka půjde do širšího provozu.
+
+**Nasazování `LIVRESCAN_APP_KEY` — pořadí, ať se appka nerozbije:**
+1. Nasadit tenhle backend (kontrola klíče je podmíněná, dokud proměnná
+   není nastavená, nic se nezmění).
+2. Sestavit a vydat appku s `--dart-define=LIVRESCAN_APP_KEY=<stejná
+   hodnota>` a počkat, až ji budou mít nainstalovanou uživatelé.
+3. Teprve pak nastavit `LIVRESCAN_APP_KEY` na živém App Service
+   (`az webapp config appsettings set -n livrescan-backend -g
+   livrescan-rg --settings LIVRESCAN_APP_KEY=...`). Před krokem 2 by tenhle
+   krok odřízl i appku, co si sama sedíš na telefonu.
+
+## Sledování chyb
+
+Volitelné, přes [Sentry](https://sentry.io) (free tier: 5 000 chyb/měsíc, 30
+dní historie). Zapíná se proměnnou `SENTRY_DSN` -- prázdná (výchozí) = úplně
+vypnuto, žádný kód se nespouští, nic nikam nejde (`configure_sentry("")` je
+no-op, `tests/test_sentry.py` to ověřuje). **Nikdy nenastavuj `SENTRY_DSN`
+při spouštění testů** -- posílaly by se tam syntetické testovací výjimky.
+
+Co se tam dostane: `logger.exception(...)` volání (typ chyby a traceback,
+Sentry na ně naváže automaticky přes standardní `logging`, žádný extra kód
+navíc) a `logger.warning(...)` jako kontext k nim. Ke každé chybě se přidá
+tag `device_id` (`X-Device-Id`, anonymní ID zařízení -- viz „Auth a
+kvóty“), takže jde poznat, jestli chybu dělá jedno zařízení opakovaně, nebo
+je to plošné.
+
+Co se tam **nedostane**, záměrně a ověřeno testem
+(`test_a_failure_does_not_leak_the_scanned_text_into_the_event`): text
+naskenované stránky. Sentry defaultně ke každé chybě přikládá i hodnoty
+lokálních proměnných ve stack trace -- v `extract()` by to znamenalo poslat
+celý sken cizí službě, mimo samotné LLM. Řeší to `include_local_variables=
+False` v `configure_sentry()`. (`max_request_body_size="never"` samo o sobě
+tohle nestačí vyřešit -- to jsem si nejdřív myslel a ověřením zjistil, že
+ne, proto to řeší obě nastavení zvlášť.) Hlavička `X-App-Key` se navíc ručně
+škrábe (`_scrub_before_send`), kdyby se někdy zachytávaly i hlavičky
+požadavku.
+
+Performance tracing je vypnutý (`traces_sample_rate=0.0`) -- zajímají nás
+jen chyby, ne rychlost, a šetří to samostatnou (menší) kvótu na
+"transactions" ve free tieru.
 
 ## Endpoint
 
@@ -199,5 +283,7 @@ Service — bacha na pořadí, kdyby se tohle dělalo znovu).
 
 ## Co tu (zatím) není
 
-- Autentizace / rate limiting — pro lokální vývoj nepotřeba, před nasazením
-  do produkce přidat (např. API klíč appky + limit requestů na zařízení).
+- Silnější ověření appky (App Attest / Play Integrity) — dnešní `X-App-Key`
+  + `X-Device-Id` je jen lehká obrana, viz „Auth a kvóty“ výš.
+- Vazba kvóty na platící uživatele (předplatné) — dnes je kvóta jen na
+  zařízení, ne na účet.

@@ -2,21 +2,27 @@ import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/camera/gallery_picker.dart';
+import '../../../../core/settings/language_settings.dart';
+import '../../../flashcards/presentation/providers/decks_provider.dart';
+import '../../../flashcards/domain/entities/deck.dart';
+import '../../domain/entities/scan_destination.dart';
+import '../widgets/scan_destination_picker.dart';
 
 /// Lets the user photograph one or more book pages (or pick them from the
 /// gallery), building up a queue of pages that all get sent off for
 /// OCR + vocabulary extraction together once they tap "Hotovo".
-class CameraScreen extends StatefulWidget {
+class CameraScreen extends ConsumerStatefulWidget {
   const CameraScreen({super.key});
 
   @override
-  State<CameraScreen> createState() => _CameraScreenState();
+  ConsumerState<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver {
+class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBindingObserver {
   final _galleryPicker = GalleryPicker();
 
   CameraController? _controller;
@@ -131,9 +137,30 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   void _removePage(int index) => setState(() => _pages.removeAt(index));
 
-  void _finish() {
+  Future<void> _finish() async {
     if (_pages.isEmpty) return;
-    context.push('/scan/review', extra: List<Uint8List>.of(_pages));
+
+    // Existing decks of the language pair being scanned; the user picks one
+    // or a new deck (skipped when there is none yet).
+    final languages = ref.read(languageSettingsProvider);
+    // If the decks can't be loaded, don't lose the scan: fall back to the
+    // default deck instead of asking.
+    final decks = await ref.read(decksProvider.future).catchError((_) => const <Deck>[]);
+    if (!mounted) return;
+    final destination = await chooseScanDestination(
+      context,
+      decksForPair: [
+        for (final deck in decks)
+          if (deck.sourceLang == languages.source && deck.targetLang == languages.target) deck,
+      ],
+      now: DateTime.now(),
+    );
+    if (destination == null || !mounted) return;
+
+    context.push(
+      '/scan/review',
+      extra: ScanRequest(images: List<Uint8List>.of(_pages), destination: destination),
+    );
   }
 
   @override

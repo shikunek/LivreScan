@@ -43,8 +43,11 @@ flutter run --release -d 00008110-000A043A1E45801E
   ([lib/core/settings/language_settings.dart](lib/core/settings/language_settings.dart)),
   ukládá se přes `shared_preferences`; seznam jazyků je v
   [lib/core/languages.dart](lib/core/languages.dart). UI: `LanguagePairBar`.
-- Jeden deck na **směrovou** dvojici (fr→cs a cs→fr jsou dva decky). Deck vznikne
-  líně při prvním skenu (`getOrCreateDefaultDeck`), ne při přepnutí jazyka.
+- Decky mají **směrovou** dvojici jazyků (fr→cs a cs→fr jsou různé), ale dvojice může
+  mít víc decků. Po „Hotovo“ v kameře se `chooseScanDestination` zeptá, kam
+  slovíčka uložit (nový deck s názvem, nebo existující); s prázdným seznamem se
+  neptá a použije `getOrCreateDefaultDeck`. Deck vzniká až po zpracování, když se
+  něco našlo (prázdný sken žádný deck nezaloží), a ne při přepnutí jazyka.
 - Zdrojový jazyk smí být jen latinkový (`canScan`): `TextRecognizer` je nastavený
   na `TextRecognitionScript.latin`. CJK/devanágarí by potřebovaly další pody na iOS
   a gradle závislosti na Androidu (viz README pluginu google_mlkit_text_recognition).
@@ -74,5 +77,15 @@ neaplikuje), takže na černé obrazovce kamery má explicitně bílý styl.
   v simulátoru, ověřuje ho uživatel na telefonu.
 - Backend URL se přepisuje `--dart-define=LIVRESCAN_BACKEND_URL=...`
   (výchozí je Azure `livrescan-backend`, viz `lib/core/constants.dart`).
+- `/extract` vyžaduje `X-Device-Id` (appka si ho sama vygeneruje a uloží,
+  `core/network/device_id.dart`) a kontroluje denní kvótu na zařízení;
+  volitelně i `X-App-Key`, pokud je appka sestavená s
+  `--dart-define=LIVRESCAN_APP_KEY=...`. Detaily a bezpečné pořadí nasazení
+  (aby se neodřízla appka, co už lidi mají nainstalovanou) jsou v
+  [backend/README.md](backend/README.md#auth-a-kvóty).
+- Volitelné sledování chyb přes Sentry (`SENTRY_DSN`, prázdné = vypnuto). Nikdy
+  nenastavuj při testech. Detaily a proč `max_request_body_size` samo nestačilo
+  (lokální proměnné ve stack trace jinak posílají naskenovaný text) jsou v
+  [backend/README.md](backend/README.md#sledování-chyb).
 - Kartičky se nededuplikují: opakovaný sken stejné stránky uloží slovíčka znovu
   (kontrola duplicit zatím neexistuje).

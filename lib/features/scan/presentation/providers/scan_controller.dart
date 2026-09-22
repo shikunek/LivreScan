@@ -6,6 +6,7 @@ import '../../../../core/di/providers.dart';
 import '../../../flashcards/domain/entities/flashcard.dart';
 import '../../../flashcards/presentation/providers/decks_provider.dart';
 import '../../../flashcards/presentation/providers/review_controller.dart';
+import '../../domain/entities/scan_destination.dart';
 import '../../domain/entities/vocab_candidate.dart';
 
 /// 1-based index of the page currently being processed, and the total page
@@ -32,6 +33,7 @@ class ScanController extends AsyncNotifier<List<Flashcard>> {
     required List<Uint8List> images,
     required String sourceLang,
     required String targetLang,
+    ScanDestination destination = const DefaultDeck(),
   }) async {
     state = const AsyncLoading();
     ref.read(scanProgressProvider.notifier).state = null;
@@ -51,21 +53,34 @@ class ScanController extends AsyncNotifier<List<Flashcard>> {
         allCandidates.addAll(candidates);
       }
 
+      // Nothing found: don't create a deck just to leave it empty.
+      if (allCandidates.isEmpty) return const <Flashcard>[];
+
       final flashcardRepository = ref.read(flashcardRepositoryProvider);
-      final deck = await flashcardRepository.getOrCreateDefaultDeck(
-        sourceLang: sourceLang,
-        targetLang: targetLang,
-      );
+      final deckId = switch (destination) {
+        DefaultDeck() => (await flashcardRepository.getOrCreateDefaultDeck(
+            sourceLang: sourceLang,
+            targetLang: targetLang,
+          ))
+            .id,
+        ExistingDeck(:final deckId) => deckId,
+        NewDeck(:final name) => (await flashcardRepository.createDeck(
+            name: name,
+            sourceLang: sourceLang,
+            targetLang: targetLang,
+          ))
+            .id,
+      };
 
       final saved = await flashcardRepository.saveCandidates(
-        deckId: deck.id,
+        deckId: deckId,
         candidates: allCandidates,
       );
 
       // The deck list (still mounted under the scan screens) and this deck's
       // review queue were loaded before these cards/deck existed.
       ref.invalidate(decksProvider);
-      ref.invalidate(reviewControllerProvider(deck.id));
+      ref.invalidate(reviewControllerProvider(deckId));
 
       return saved;
     });

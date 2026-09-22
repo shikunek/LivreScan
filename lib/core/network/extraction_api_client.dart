@@ -5,9 +5,16 @@ import '../../features/scan/domain/entities/vocab_candidate.dart';
 /// Talks to the LivreScan backend's `POST /extract` endpoint, which calls
 /// Claude to pull vocabulary/phrases with translations out of raw OCR text.
 class ExtractionApiClient {
-  ExtractionApiClient(this._dio);
+  // Not `this._deviceId`: that would make the named parameter private
+  // (`_deviceId`), unusable from the other files that construct this.
+  // ignore: prefer_initializing_formals
+  ExtractionApiClient(this._dio, {required String deviceId}) : _deviceId = deviceId;
 
   final Dio _dio;
+
+  /// Sent as `X-Device-Id` so the backend can track this install's free
+  /// daily scan quota. See `core/network/device_id.dart`.
+  final String _deviceId;
 
   Future<List<VocabCandidate>> extract({
     required String text,
@@ -23,6 +30,7 @@ class ExtractionApiClient {
         'targetLang': targetLang,
         'maxItems': maxItems,
       },
+      options: Options(headers: {'X-Device-Id': _deviceId}),
     );
 
     final items = (response.data?['items'] as List<dynamic>? ?? [])

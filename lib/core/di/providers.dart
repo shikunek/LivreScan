@@ -7,17 +7,18 @@ import '../../features/scan/data/repositories/scan_repository_impl.dart';
 import '../../features/scan/domain/repositories/scan_repository.dart';
 import '../../features/scan/domain/usecases/scan_page_usecase.dart';
 import '../constants.dart';
+import '../network/device_id.dart';
 import '../network/extraction_api_client.dart';
 import '../ocr/text_recognizer_service.dart';
 import '../srs/sm2_scheduler.dart';
 import '../storage/database.dart';
 
 final dioProvider = Provider<Dio>((ref) {
-  return Dio(BaseOptions(baseUrl: kBackendBaseUrl));
+  return Dio(BaseOptions(baseUrl: kBackendBaseUrl, headers: appKeyHeaders(kAppKey)));
 });
 
 final extractionApiClientProvider = Provider<ExtractionApiClient>((ref) {
-  return ExtractionApiClient(ref.watch(dioProvider));
+  return ExtractionApiClient(ref.watch(dioProvider), deviceId: ref.watch(deviceIdProvider));
 });
 
 final textRecognizerServiceProvider = Provider<TextRecognizerService>((ref) {

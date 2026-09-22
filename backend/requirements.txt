@@ -3,3 +3,4 @@ uvicorn[standard]>=0.32,<0.33
 anthropic>=0.40,<0.41
 openai>=1.50,<2.0
 python-dotenv>=1.0,<2.0
+sentry-sdk>=2.0,<3.0

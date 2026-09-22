@@ -13,8 +13,10 @@ appka za tebe rozhodne, co stojí za naučení.
 4. Backend zavolá Claude API a vrátí seznam kandidátů: slovo/fráze, překlad,
    slovní druh, příkladová věta, CEFR obtížnost.
 5. **Appka automaticky uloží všechny vrácené kandidáty** jako `Flashcard`
-   do lokální SQLite (Drift) DB, do decku podle jazykové dvojice (vytvoří se
-   sám při prvním skenu — `getOrCreateDefaultDeck`).
+   do lokální SQLite (Drift) DB. Kam, určuje `ScanDestination`: po „Hotovo“ v
+   kameře si uživatel vybere nový deck (s názvem) nebo existující deck stejné
+   jazykové dvojice; pokud žádný neexistuje, vytvoří se výchozí deck
+   (`getOrCreateDefaultDeck`). Nový deck vzniká až po úspěšném zpracování.
 6. `ScanResultScreen` zobrazí, co se přidalo (jen informativně, nic se tam
    neodklikává).
 7. Review obrazovka bere kartičky s `dueDate <= now` a po každé odpovědi
@@ -28,7 +30,8 @@ core/
   ocr/      # TextRecognizerService — wrapper nad ML Kit
   camera/   # GalleryPicker (image_picker fallback ke kameře)
   srs/      # Sm2Scheduler — čistá logika, žádné závislosti na Flutteru/DB
-  network/  # ExtractionApiClient (Dio) — volání backendu
+  network/  # ExtractionApiClient (Dio) — volání backendu; device_id.dart — ID
+            # zařízení pro backendovou kvótu (shared_preferences)
   storage/  # Drift AppDatabase (tabulky Decks, Cards → DeckRow/CardRow)
   di/       # providers.dart — Riverpod DI pro celý graf závislostí
   constants.dart  # výchozí jazyky, backend URL (dart-define)

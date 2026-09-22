@@ -10,6 +10,7 @@ import 'package:livrescan/features/flashcards/domain/entities/flashcard.dart';
 import 'package:livrescan/features/flashcards/domain/repositories/flashcard_repository.dart';
 import 'package:livrescan/features/flashcards/presentation/providers/decks_provider.dart';
 import 'package:livrescan/features/flashcards/presentation/providers/review_controller.dart';
+import 'package:livrescan/features/scan/domain/entities/scan_destination.dart';
 import 'package:livrescan/features/scan/domain/entities/vocab_candidate.dart';
 import 'package:livrescan/features/scan/domain/repositories/scan_repository.dart';
 import 'package:livrescan/features/scan/domain/usecases/scan_page_usecase.dart';
@@ -34,6 +35,19 @@ class _FakeScanRepository implements ScanRepository {
       ),
     ];
   }
+}
+
+class _EmptyScanRepository implements ScanRepository {
+  @override
+  Future<String> recognizeText(Uint8List imageBytes) async => 'some text';
+
+  @override
+  Future<List<VocabCandidate>> extractVocabulary({
+    required String text,
+    required String sourceLang,
+    required String targetLang,
+  }) async =>
+      const [];
 }
 
 class _InMemoryFlashcardRepository implements FlashcardRepository {
@@ -142,5 +156,80 @@ void main() {
     decks = await container.read(decksProvider.future);
     expect(decks.map((d) => '${d.sourceLang}→${d.targetLang}'), ['cs→en', 'fr→cs']);
     expect(await container.read(reviewControllerProvider(1).future), hasLength(2));
+  });
+
+  group('scan destination', () {
+    late _InMemoryFlashcardRepository repo;
+    late ProviderContainer container;
+
+    setUp(() {
+      repo = _InMemoryFlashcardRepository();
+      container = ProviderContainer(overrides: [
+        flashcardRepositoryProvider.overrideWithValue(repo),
+        scanPageUseCaseProvider.overrideWithValue(ScanPageUseCase(_FakeScanRepository())),
+      ]);
+      addTearDown(container.dispose);
+    });
+
+    Future<void> scan(ScanDestination destination) {
+      return container.read(scanControllerProvider.notifier).processAndSave(
+            images: [Uint8List(0)],
+            sourceLang: 'fr',
+            targetLang: 'cs',
+            destination: destination,
+          );
+    }
+
+    test('a new deck is created for every scan that asks for one', () async {
+      await scan(const NewDeck('Kapitola 1'));
+      await scan(const NewDeck('Kapitola 2'));
+
+      expect(repo.decks.map((d) => d.name), ['Kapitola 1', 'Kapitola 2']);
+      expect(repo.decks.map((d) => '${d.sourceLang}→${d.targetLang}'), ['fr→cs', 'fr→cs']);
+      expect(repo.cards.map((c) => c.deckId), [1, 2]);
+    });
+
+    test('an existing deck receives the cards and no deck is created', () async {
+      await scan(const NewDeck('Kapitola 1'));
+      await scan(const ExistingDeck(1));
+
+      expect(repo.decks, hasLength(1));
+      expect(repo.cards.map((c) => c.deckId), [1, 1]);
+    });
+
+    test('the default destination reuses the deck of the pair', () async {
+      await scan(const DefaultDeck());
+      await scan(const DefaultDeck());
+
+      expect(repo.decks, hasLength(1));
+      expect(repo.cards, hasLength(2));
+    });
+
+    test('the deck list shows a deck created by a scan', () async {
+      container.listen(decksProvider, (_, _) {});
+      expect(await container.read(decksProvider.future), isEmpty);
+
+      await scan(const NewDeck('Kapitola 1'));
+
+      expect((await container.read(decksProvider.future)).map((d) => d.name), ['Kapitola 1']);
+    });
+
+    test('a scan that finds nothing creates no empty deck', () async {
+      final emptyContainer = ProviderContainer(overrides: [
+        flashcardRepositoryProvider.overrideWithValue(repo),
+        scanPageUseCaseProvider.overrideWithValue(ScanPageUseCase(_EmptyScanRepository())),
+      ]);
+      addTearDown(emptyContainer.dispose);
+
+      await emptyContainer.read(scanControllerProvider.notifier).processAndSave(
+            images: [Uint8List(0)],
+            sourceLang: 'fr',
+            targetLang: 'cs',
+            destination: const NewDeck('Prázdný'),
+          );
+
+      expect(repo.decks, isEmpty);
+      expect(emptyContainer.read(scanControllerProvider).value, isEmpty);
+    });
   });
 }

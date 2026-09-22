@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,15 +9,21 @@ import 'package:go_router/go_router.dart';
 import '../../../../app/theme.dart';
 import '../../../../core/settings/language_settings.dart';
 import '../../../flashcards/domain/entities/flashcard.dart';
+import '../../domain/entities/scan_destination.dart';
 import '../providers/scan_controller.dart';
 
 /// Runs OCR + extraction automatically as soon as it opens (no user
 /// selection step) and shows what got added to the deck. Accepts one or
 /// several page photos, processed in order and merged into one save.
 class ScanResultScreen extends ConsumerStatefulWidget {
-  const ScanResultScreen({super.key, required this.images});
+  const ScanResultScreen({
+    super.key,
+    required this.images,
+    this.destination = const DefaultDeck(),
+  });
 
   final List<Uint8List> images;
+  final ScanDestination destination;
 
   @override
   ConsumerState<ScanResultScreen> createState() => _ScanResultScreenState();
@@ -35,6 +42,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> {
           images: widget.images,
           sourceLang: languages.source,
           targetLang: languages.target,
+          destination: widget.destination,
         );
   }
 
@@ -68,7 +76,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> {
               children: [
                 Icon(Icons.error_outline, size: 48, color: Theme.of(context).colorScheme.error),
                 const SizedBox(height: 12),
-                Text('Nepodařilo se zpracovat fotky:\n$error', textAlign: TextAlign.center),
+                Text(_friendlyError(error), textAlign: TextAlign.center),
                 const SizedBox(height: 20),
                 FilledButton(
                   onPressed: _run,
@@ -82,6 +90,40 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> {
       ),
     );
   }
+}
+
+/// What went wrong, in words the user can act on. Unknown errors keep the
+/// technical text so they can still be reported.
+String _friendlyError(Object error) {
+  if (error is DioException) {
+    final status = error.response?.statusCode;
+    // The backend's own errors are `{"detail": {"message": ..., "reason":
+    // ...}}` (a machine-readable reason alongside the English message it
+    // logs) -- see backend/app/main.py.
+    final body = error.response?.data;
+    final detail = body is Map ? body['detail'] : null;
+    final reasonCode = detail is Map ? detail['reason'] as String? : null;
+
+    if (reasonCode == 'quota_exceeded') {
+      return 'Dnešní počet zdarma naskenovaných stránek je vyčerpaný.\nZkus to zítra.';
+    }
+    if (reasonCode == 'unauthorized') {
+      return 'Appka potřebuje aktualizaci, aby mohla dál skenovat.';
+    }
+    if (status == 429 || status == 503) {
+      return 'Server je teď vytížený.\nZkus to za chvilku.';
+    }
+    if (status != null && status >= 500) {
+      return 'Server teď nedokázal stránku zpracovat.\nZkus to znovu.';
+    }
+    if (error.type == DioExceptionType.connectionError ||
+        error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout) {
+      return 'Nepodařilo se spojit se serverem.\nZkontroluj připojení k internetu.';
+    }
+  }
+  return 'Nepodařilo se zpracovat fotky:\n$error';
 }
 
 class _ResultList extends StatelessWidget {

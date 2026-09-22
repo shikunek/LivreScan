@@ -1,17 +1,29 @@
 import json
+import logging
 import os
 import re
 from functools import lru_cache
 from typing import Literal, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, ValidationError
+
+import sentry_sdk
+
+from app import quota
 
 load_dotenv()
 
 MAX_TEXT_LENGTH = 8000
 MAX_ITEMS_CAP = 30
+
+# The free LLM tiers rate-limit by tokens per minute (Groq: 8000 for
+# gpt-oss-120b, and one page costs ~2800). On a 429 the client waits for the
+# Retry-After the provider sends and tries again, so a page or two too many
+# just takes longer instead of failing.
+LLM_MAX_RETRIES = 6
+LLM_TIMEOUT_SECONDS = 60
 
 # Which extraction backend to use: "mock" (free, fake data), "claude"
 # (Anthropic, paid), or "openrouter" (free-tier hosted Phi-4, no cost).
@@ -23,7 +35,64 @@ OPENROUTER_MODEL = os.environ.get(
 )
 GROQ_MODEL = os.environ.get("LIVRESCAN_GROQ_MODEL", "openai/gpt-oss-120b")
 
+# Shared secret the app sends as `X-App-Key`. Empty (the default) means no
+# app key is required -- that's the state until a build with the key baked
+# in has actually been rolled out, see backend/README.md before setting
+# this on the live app, otherwise already-installed app builds break.
+APP_KEY = os.environ.get("LIVRESCAN_APP_KEY", "")
+
+# Free pages per device per day. <= 0 disables the quota entirely.
+DAILY_PAGE_LIMIT = int(os.environ.get("LIVRESCAN_DAILY_PAGE_LIMIT", "20"))
+
+_quota = quota.Quota(quota.default_db_path())
+
+# Error tracking (free tier: sentry.io). Off by default -- SENTRY_DSN is
+# empty unless explicitly set, so local dev/CI never sends anything there
+# (don't set this var while running the tests). See "Sledování chyb" in
+# backend/README.md.
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+
+
+def _scrub_before_send(event, hint):
+    """Strips `X-App-Key` from whatever Sentry captured. The scanned page
+    text never reaches Sentry in the first place (`max_request_body_size=
+    "never"` below), this is just defense in depth for the one other secret
+    a request could carry."""
+    headers = event.get("request", {}).get("headers")
+    if headers:
+        for key in list(headers):
+            if key.lower() == "x-app-key":
+                headers[key] = "[Filtered]"
+    return event
+
+
+def configure_sentry(dsn: str) -> None:
+    if not dsn:
+        return
+    sentry_sdk.init(
+        dsn=dsn,
+        environment="azure" if os.environ.get("WEBSITE_INSTANCE_ID") else "local",
+        # Error tracking only -- no performance/trace data, to stay well
+        # inside the free tier's separate (smaller) transactions quota.
+        traces_sample_rate=0.0,
+        send_default_pii=False,
+        max_request_body_size="never",
+        # The default (True) attaches every local variable of every stack
+        # frame to a captured exception -- that includes `text`/`prompt` in
+        # extract(), i.e. the scanned page content, sent to a third party
+        # regardless of max_request_body_size (verified: without this, a
+        # forced failure leaked the scanned text into the event).
+        include_local_variables=False,
+        before_send=_scrub_before_send,
+    )
+
+
+configure_sentry(SENTRY_DSN)
+
 app = FastAPI(title="LivreScan backend")
+
+# Shows up in the uvicorn output (and so in the Azure container logs).
+logger = logging.getLogger("uvicorn.error")
 
 
 class ExtractRequest(BaseModel):
@@ -125,6 +194,18 @@ def build_prompt(text: str, source_lang: str, target_lang: str, max_items: int) 
     )
 
 
+def _parse_items(raw_items) -> list[VocabItem]:
+    """Validate the model's items one by one: a single malformed item (missing
+    field, unexpected `type`) is skipped instead of failing the whole page."""
+    items: list[VocabItem] = []
+    for raw in raw_items or []:
+        try:
+            items.append(VocabItem(**raw))
+        except (TypeError, ValidationError):
+            logger.warning("Skipping malformed item from the model: %r", raw)
+    return items
+
+
 def mock_extract(text: str, max_items: int, **_ignored) -> list[VocabItem]:
     """Fake but structurally valid extraction, so the app can be exercised
     end-to-end without spending real API credits."""
@@ -175,7 +256,7 @@ def claude_extract(*, prompt: str, **_ignored) -> list[VocabItem]:
     )
     for block in message.content:
         if block.type == "tool_use" and block.name == "return_vocabulary":
-            return [VocabItem(**item) for item in block.input.get("items", [])]
+            return _parse_items(block.input.get("items", []))
     raise HTTPException(502, "Claude did not return structured vocabulary")
 
 
@@ -186,6 +267,8 @@ def _openrouter_client():
     return OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        max_retries=LLM_MAX_RETRIES,
+        timeout=LLM_TIMEOUT_SECONDS,
     )
 
 
@@ -217,7 +300,7 @@ def openrouter_extract(*, prompt: str, **_ignored) -> list[VocabItem]:
     )
     raw = completion.choices[0].message.content or ""
     data = _extract_json_object(raw)
-    return [VocabItem(**item) for item in data.get("items", [])]
+    return _parse_items(data.get("items", []))
 
 
 @lru_cache
@@ -227,7 +310,26 @@ def _groq_client():
     return OpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=os.environ.get("GROQ_API_KEY", ""),
+        max_retries=LLM_MAX_RETRIES,
+        timeout=LLM_TIMEOUT_SECONDS,
     )
+
+
+def _groq_create_with_retry(**kwargs):
+    """Groq validates the tool call against our schema and rejects the whole
+    answer with 400 `tool_use_failed` when the model slips (e.g. invents a
+    `type` other than word/phrase for one item). That is random, so trying
+    again almost always works."""
+    import openai
+
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            return _groq_client().chat.completions.create(**kwargs)
+        except openai.BadRequestError as exc:
+            if getattr(exc, "code", None) != "tool_use_failed" or attempt == attempts:
+                raise
+            logger.warning("Groq tool_use_failed (attempt %d/%d), retrying", attempt, attempts)
 
 
 def groq_extract(*, prompt: str, **_ignored) -> list[VocabItem]:
@@ -239,7 +341,7 @@ def groq_extract(*, prompt: str, **_ignored) -> list[VocabItem]:
             "parameters": VOCAB_SCHEMA,
         },
     }
-    completion = _groq_client().chat.completions.create(
+    completion = _groq_create_with_retry(
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
         tools=[tool],
@@ -249,7 +351,7 @@ def groq_extract(*, prompt: str, **_ignored) -> list[VocabItem]:
     if not tool_calls:
         raise HTTPException(502, "Groq did not return structured vocabulary")
     args = json.loads(tool_calls[0].function.arguments)
-    return [VocabItem(**item) for item in args.get("items", [])]
+    return _parse_items(args.get("items", []))
 
 
 EXTRACTORS = {
@@ -261,11 +363,42 @@ EXTRACTORS = {
 
 
 @app.post("/extract", response_model=ExtractResponse)
-def extract(req: ExtractRequest) -> ExtractResponse:
+def extract(
+    req: ExtractRequest,
+    x_device_id: Optional[str] = Header(None, alias="X-Device-Id"),
+    x_app_key: Optional[str] = Header(None, alias="X-App-Key"),
+) -> ExtractResponse:
+    if x_device_id:
+        # Lets Sentry group/filter issues by device without knowing who the
+        # device belongs to -- same id already used for the quota above.
+        sentry_sdk.set_tag("device_id", x_device_id)
+
+    if APP_KEY and x_app_key != APP_KEY:
+        raise HTTPException(
+            401, detail={"message": "Invalid or missing app key.", "reason": "unauthorized"}
+        )
+    if not x_device_id:
+        raise HTTPException(
+            401, detail={"message": "Missing X-Device-Id header.", "reason": "unauthorized"}
+        )
+
     text = req.text.strip()
     if not text:
         raise HTTPException(400, "text must not be empty")
     text = text[:MAX_TEXT_LENGTH]
+
+    try:
+        _quota.consume(x_device_id, daily_limit=DAILY_PAGE_LIMIT)
+    except quota.QuotaExceeded as exc:
+        raise HTTPException(
+            429,
+            detail={
+                "message": (
+                    f"Daily free limit of {exc.limit} pages reached. Try again tomorrow."
+                ),
+                "reason": "quota_exceeded",
+            },
+        ) from exc
 
     max_items = max(1, min(req.maxItems, MAX_ITEMS_CAP))
     prompt = build_prompt(text, req.sourceLang, req.targetLang, max_items)
@@ -274,7 +407,27 @@ def extract(req: ExtractRequest) -> ExtractResponse:
     if extractor is None:
         raise HTTPException(500, f"Unknown LIVRESCAN_PROVIDER: {PROVIDER!r}")
 
-    items = extractor(text=text, max_items=max_items, prompt=prompt)
+    try:
+        items = extractor(text=text, max_items=max_items, prompt=prompt)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Extraction failed (provider=%s)", PROVIDER)
+        if getattr(exc, "status_code", None) == 429:
+            raise HTTPException(
+                429,
+                detail={
+                    "message": "The language model is busy right now. Try again in a moment.",
+                    "reason": "provider_busy",
+                },
+            ) from exc
+        raise HTTPException(
+            502,
+            detail={
+                "message": "The language model could not process this page.",
+                "reason": "provider_error",
+            },
+        ) from exc
     return ExtractResponse(items=items)
 
 
