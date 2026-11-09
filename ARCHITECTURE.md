@@ -78,8 +78,8 @@ přes vynucené tool-use volání, takže odpověď je vždy validní JSON podle
 schématu. `ExtractionApiClient` (`lib/core/network/extraction_api_client.dart`)
 je proti tomuto kontraktu napsaný a otestovaný proti běžícímu serveru.
 Spuštění a napojení appky (včetně Android emulator caveat s `10.0.2.2`) je
-v `backend/README.md`. Auth/rate-limiting zatím žádné — pro lokální vývoj
-netřeba, před nasazením do produkce doplnit.
+v `backend/README.md`. `/extract` vyžaduje `X-Device-Id` a hlídá denní kvótu
+na zařízení, viz `backend/README.md#auth-a-kvóty`.
 
 Zkoušeli jsme i Gemini free tier (`google-genai`), ale narazili jsme na
 aktuální (2026) rozbitý přechod Googlu na nový formát API klíčů
@@ -103,13 +103,26 @@ byl snadný, kontrakt `/extract` na tom nezávisí.
 - `ScanResultScreen` + `ScanController` — po vyfocení automaticky OCR →
   extrakce → uložení všech kandidátů, žádný krok navíc od uživatele
 - `ReviewScreen` + `ReviewController` — kartička s tap-to-reveal, 3 hodnoticí
-  smajlíky (😞 Znovu / 😐 Těžké / 😊 Dobré → SM-2 `again`/`hard`/`good`), fronta
-  due karet se po ohodnocení zmenšuje bez nutnosti znovu načítat z DB
+  smajlíky. Popisky jsou schválně **obrácené** vůči interním SM-2 názvům:
+  😞 **Těžké** → `ReviewGrade.again` (slovo jsi vůbec nepoznal(a), tvrdý reset),
+  😐 **Znovu** → `ReviewGrade.hard` (poznal(a) jsi ho, jen sis nevzpomněl(a) na
+  překlad, mírnější — pořád se počítá jako opakování), 😊 **Lehké** →
+  `ReviewGrade.easy`. Důvod je v komentáři u tlačítek v `review_screen.dart`;
+  test `test/review_screen_test.dart` (přes `bySemanticsLabel`) hlídá, že se
+  popisky s gradem znovu neprohodí zpátky. `ReviewGrade.good` zůstává v enum
+  a ve scheduleru, jen ho UI nepoužívá — je ease-neutrální podle SM-2 vzorce.
+  Fronta due karet se po ohodnocení zmenšuje bez nutnosti znovu načítat z DB
 - `DeckListScreen` + `decksProvider` — reálné decky z DB (`AsyncNotifier`,
   autoDispose, pull-to-refresh), tap na deck vede na `/deck/:id/review`,
   posun zprava doleva vysune „Smazat“, klepnutí na něj deck smaže (i s kartičkami)
 - `WordListScreen` (`/deck/:id/words`) — seznam všech slovíček decku, nejnovější první;
-  otevírá se ikonou seznamu v řádku decku
+  otevírá se ikonou seznamu v řádku decku. Klepnutím na slovíčko se otevře detail
+  (příkladová věta, slovní druh a celý SM-2 stav — ease factor, interval, počet
+  opakování, kdy je další opakování), který review obrazovka neukazuje. U slovíček, která
+  ještě nejsou splatná, je v detailu i tlačítko „Procvičit hned“
+  (`markDueNow`) — nastaví `dueDate` na teď beze změny ease factoru/intervalu/
+  počtu opakování, pro ruční přeřazení do dnešní fronty (i pro rychlé testování
+  bez čekání na skutečný den)
 - Výběr jazykové dvojice (`LanguagePairBar`), jeden deck na směrovou dvojici
 - DI graf (`core/di/providers.dart`) propojující všechny vrstvy
 - Routing (go_router)
@@ -123,7 +136,8 @@ byl snadný, kontrakt `/extract` na tom nezávisí.
 - Ruční vytváření/přejmenování decků v UI (deck se zakládá jen automaticky
   při prvním skenu jazykové dvojice)
 - Kontrola duplicit při opakovaném skenu stejné stránky
-- Auth/rate-limiting backendu
+- Silnější ověření appky (App Attest / Play Integrity) — dnešní
+  `X-App-Key`/`X-Device-Id` je jen lehká obrana, viz backend/README.md
 - Známé omezení: Google ML Kit iOS binárky nemají arm64 slice pro simulátor
   (Apple Silicon) — OCR flow lze živě otestovat jen na reálném iPhonu nebo
   v Android emulátoru/zařízení

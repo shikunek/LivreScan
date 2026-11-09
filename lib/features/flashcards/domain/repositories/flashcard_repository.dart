@@ -35,4 +35,10 @@ abstract class FlashcardRepository {
   Future<List<Flashcard>> getDueCards(int deckId);
 
   Future<void> submitReview(int cardId, ReviewGrade grade);
+
+  /// Makes the card due right now, without touching its ease factor,
+  /// interval or repetition count. Lets the learner (or, while testing,
+  /// the developer) pull a card into today's queue ahead of schedule
+  /// instead of waiting for SM-2's normal interval.
+  Future<void> markDueNow(int cardId);
 }

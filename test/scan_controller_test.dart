@@ -117,6 +117,9 @@ class _InMemoryFlashcardRepository implements FlashcardRepository {
 
   @override
   Future<void> submitReview(int cardId, ReviewGrade grade) async {}
+
+  @override
+  Future<void> markDueNow(int cardId) async {}
 }
 
 void main() {

@@ -66,7 +66,7 @@ void main() {
   for (final (emoji, grade) in [
     ('😞', ReviewGrade.again),
     ('😐', ReviewGrade.hard),
-    ('😊', ReviewGrade.good),
+    ('😊', ReviewGrade.easy),
   ]) {
     testWidgets('grading: $emoji submits ${grade.name}, with three buttons and no labels',
         (tester) async {
@@ -83,6 +83,30 @@ void main() {
       await tester.tap(find.text(emoji));
       await tester.pumpAndSettle();
       expect(repository.grades, [grade]);
+    });
+  }
+
+  // Locks in the deliberate label/grade mismatch: "Těžké" ("never even
+  // recognized the word") maps to the harsher ReviewGrade.again (full
+  // reset), and "Znovu" ("recognized it, forgot the translation") maps to
+  // the lighter ReviewGrade.hard -- opposite of what the English SM-2 names
+  // suggest. See the comment in review_screen.dart for why.
+  for (final (accessibilityLabel, grade) in [
+    ('Těžké', ReviewGrade.again),
+    ('Znovu', ReviewGrade.hard),
+  ]) {
+    testWidgets('the button labelled "$accessibilityLabel" submits ${grade.name}',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      final repository = await _pumpReview(tester);
+      await tester.tap(find.text('courir'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(accessibilityLabel));
+      await tester.pumpAndSettle();
+      expect(repository.grades, [grade]);
+
+      handle.dispose();
     });
   }
 }

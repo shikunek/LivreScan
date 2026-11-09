@@ -43,6 +43,15 @@ class _FakeRepository extends Fake implements FlashcardRepository {
   Future<List<Flashcard>> getCards(int deckId) async => cards;
 }
 
+class _RecordingRepository extends _FakeRepository {
+  _RecordingRepository(super.cards);
+
+  final markedDueNow = <int>[];
+
+  @override
+  Future<void> markDueNow(int cardId) async => markedDueNow.add(cardId);
+}
+
 Future<SharedPreferences> _prefs() async {
   SharedPreferences.setMockInitialValues({});
   return SharedPreferences.getInstance();
@@ -119,6 +128,212 @@ void main() {
     expect(find.text('Slovíčka'), findsOneWidget);
     expect(find.text('courir'), findsOneWidget);
     expect(find.text('běžet'), findsOneWidget);
+  });
+
+  group('card detail sheet', () {
+    Flashcard cardWithSrs(Sm2State srs, {String? partOfSpeech}) => Flashcard(
+          id: 1,
+          deckId: 1,
+          original: 'courir',
+          translation: 'běžet',
+          type: VocabType.word,
+          exampleSentence: 'Il aime courir le matin.',
+          partOfSpeech: partOfSpeech,
+          srs: srs,
+        );
+
+    Future<void> pumpAndOpen(WidgetTester tester, Flashcard card) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [flashcardRepositoryProvider.overrideWithValue(_FakeRepository([card]))],
+          child: const MaterialApp(home: WordListScreen(deckId: 1)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('courir'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('tapping a row shows word details including SM-2 state not shown in the list',
+        (tester) async {
+      await pumpAndOpen(
+        tester,
+        cardWithSrs(
+          Sm2State(
+            easeFactor: 2.5,
+            intervalDays: 0,
+            repetitions: 0,
+            dueDate: DateTime.now(),
+          ),
+        ),
+      );
+
+      expect(find.text('slovo'), findsOneWidget);
+      expect(find.text('—'), findsOneWidget); // no part of speech given
+      expect(find.text('Il aime courir le matin.'), findsOneWidget);
+      expect(find.text('2.50'), findsOneWidget);
+      expect(find.text('zatím neopakováno'), findsOneWidget);
+      expect(find.text('0'), findsOneWidget); // repetitions
+    });
+
+    testWidgets('a phrase and a known part of speech are shown as such', (tester) async {
+      await pumpAndOpen(
+        tester,
+        Flashcard(
+          id: 1,
+          deckId: 1,
+          original: 'courir',
+          translation: 'běžet',
+          type: VocabType.phrase,
+          exampleSentence: 'Il aime courir le matin.',
+          partOfSpeech: 'verb',
+          srs: Sm2State.initial(),
+        ),
+      );
+
+      expect(find.text('fráze'), findsOneWidget);
+      expect(find.text('verb'), findsOneWidget);
+    });
+
+    // Each case is its own test (not a loop of pumpWidget calls within one
+    // test): a second pumpWidget while a modal sheet from the first is still
+    // settling leaves stray matches behind and makes find.text ambiguous.
+    for (final (days, expected) in [(1, '1 den'), (3, '3 dny'), (5, '5 dní')]) {
+      testWidgets('interval of $days day(s) is shown as "$expected"', (tester) async {
+        await pumpAndOpen(
+          tester,
+          cardWithSrs(
+            Sm2State(
+              easeFactor: 2.5,
+              intervalDays: days,
+              repetitions: 1,
+              dueDate: DateTime.now().add(Duration(days: days)),
+            ),
+          ),
+        );
+        expect(find.text(expected), findsOneWidget);
+      });
+    }
+
+    for (final (label, offset, expectedSubstring) in [
+      ('already due', Duration.zero, 'už teď'),
+      ('tomorrow', const Duration(days: 1), 'zítra'),
+      ('in 6 days', const Duration(days: 6), 'za 6 dní'),
+    ]) {
+      testWidgets('the due date $label is described as "$expectedSubstring"', (tester) async {
+        await pumpAndOpen(
+          tester,
+          cardWithSrs(
+            Sm2State(
+              easeFactor: 2.5,
+              intervalDays: 1,
+              repetitions: 1,
+              dueDate: DateTime.now().add(offset),
+            ),
+          ),
+        );
+        expect(find.textContaining(expectedSubstring), findsOneWidget);
+      });
+    }
+  });
+
+  group('marking a card due now', () {
+    Flashcard futureCard() => Flashcard(
+          id: 1,
+          deckId: 1,
+          original: 'courir',
+          translation: 'běžet',
+          type: VocabType.word,
+          exampleSentence: '',
+          srs: Sm2State(
+            easeFactor: 2.5,
+            intervalDays: 6,
+            repetitions: 2,
+            dueDate: DateTime.now().add(const Duration(days: 6)),
+          ),
+        );
+
+    testWidgets('shows a button only for a card that is not due yet', (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            flashcardRepositoryProvider.overrideWithValue(_FakeRepository([futureCard()])),
+          ],
+          child: const MaterialApp(home: WordListScreen(deckId: 1)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('courir'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Procvičit hned'), findsOneWidget);
+    });
+
+    testWidgets('is absent for a card that is already due', (tester) async {
+      final due = Flashcard(
+        id: 1,
+        deckId: 1,
+        original: 'courir',
+        translation: 'běžet',
+        type: VocabType.word,
+        exampleSentence: '',
+        srs: Sm2State.initial(), // dueDate = now
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [flashcardRepositoryProvider.overrideWithValue(_FakeRepository([due]))],
+          child: const MaterialApp(home: WordListScreen(deckId: 1)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('courir'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Procvičit hned'), findsNothing);
+    });
+
+    testWidgets('tapping it marks the card due now and closes the sheet', (tester) async {
+      final repository = _RecordingRepository([futureCard()]);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [flashcardRepositoryProvider.overrideWithValue(repository)],
+          child: const MaterialApp(home: WordListScreen(deckId: 1)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('courir'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Procvičit hned'));
+      await tester.pumpAndSettle();
+
+      expect(repository.markedDueNow, [1]);
+      expect(find.text('Procvičit hned'), findsNothing); // sheet closed
+    });
+
+    test('FlashcardRepositoryImpl.markDueNow sets dueDate without touching SM-2 stats',
+        () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      final repository = FlashcardRepositoryImpl(db, Sm2Scheduler());
+      final deck = await repository.createDeck(name: 'A', sourceLang: 'fr', targetLang: 'cs');
+      final saved = await repository.saveCandidates(
+        deckId: deck.id,
+        candidates: const [
+          VocabCandidate(original: 'a', translation: 'x', type: VocabType.word, exampleSentence: ''),
+        ],
+      );
+      await repository.submitReview(saved.first.id, ReviewGrade.hard);
+      final beforeCard = (await repository.getCards(deck.id)).single;
+
+      await repository.markDueNow(saved.first.id);
+
+      final afterCard = (await repository.getCards(deck.id)).single;
+      expect(afterCard.isDue, isTrue);
+      expect(afterCard.srs.easeFactor, beforeCard.srs.easeFactor);
+      expect(afterCard.srs.intervalDays, beforeCard.srs.intervalDays);
+      expect(afterCard.srs.repetitions, beforeCard.srs.repetitions);
+    });
   });
 
   test('the app router has the word list route', () {

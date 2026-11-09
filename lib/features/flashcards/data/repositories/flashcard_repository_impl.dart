@@ -132,6 +132,13 @@ class FlashcardRepositoryImpl implements FlashcardRepository {
     );
   }
 
+  @override
+  Future<void> markDueNow(int cardId) {
+    return (_db.update(_db.cards)..where((c) => c.id.equals(cardId))).write(
+      CardsCompanion(dueDate: Value(DateTime.now())),
+    );
+  }
+
   Deck _deckFromRow(DeckRow row) => Deck(
         id: row.id,
         name: row.name,

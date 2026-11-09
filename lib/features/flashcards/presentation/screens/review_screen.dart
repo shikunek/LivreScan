@@ -99,22 +99,37 @@ class _ReviewSession extends StatelessWidget {
               ? Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    // Labels are swapped relative to the internal SM-2 grade
+                    // names on purpose: "Těžké" here means "never even
+                    // recognized the word" (the worse lapse -- full reset,
+                    // ReviewGrade.again), while "Znovu" means "recognized it,
+                    // just forgot the translation" (a lighter miss that still
+                    // counts as a repetition, ReviewGrade.hard). Positions
+                    // stay worst-to-best left to right; only the Czech
+                    // wording changed to match how a learner actually
+                    // distinguishes the two failure modes.
                     _GradeButton(
                       emoji: '😞',
-                      label: 'Znovu',
+                      label: 'Těžké',
                       onTap: () => onGrade(ReviewGrade.again),
                     ),
                     const SizedBox(width: 16),
                     _GradeButton(
                       emoji: '😐',
-                      label: 'Těžké',
+                      label: 'Znovu',
                       onTap: () => onGrade(ReviewGrade.hard),
                     ),
                     const SizedBox(width: 16),
                     _GradeButton(
+                      // "Dobré" (quality 4) is ease-neutral by the SM-2
+                      // formula -- with no "Lehké" button separate from it,
+                      // ease factor could only ever go down (via "Těžké"),
+                      // never up. Grading the third button as "easy"
+                      // (quality 5) instead lets it grow, at the cost of
+                      // conflating "knew it" with "knew it effortlessly".
                       emoji: '😊',
-                      label: 'Dobré',
-                      onTap: () => onGrade(ReviewGrade.good),
+                      label: 'Lehké',
+                      onTap: () => onGrade(ReviewGrade.easy),
                     ),
                   ],
                 )
